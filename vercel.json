@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "functions": {
+    "api/extrair-stream.js": {
+      "maxDuration": 300,
+      "memory": 2048
+    },
+    "api/download.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    }
+  }
+}

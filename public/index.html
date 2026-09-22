@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Extrator Multi-Arquivos</title>
+    <style>
+        :root { 
+            --bg: #f8f9fa; --text: #1f2937; --card-bg: #ffffff;
+            --primary: #3b82f6; --border: #e5e7eb; --input-bg: #ffffff;
+            --log-bg: #1e1e1e; --log-text: #00ff00;
+        }
+
+        body.dark-mode {
+            --bg: #121212; --text: #f3f4f6; --card-bg: #1f2937;
+            --primary: #60a5fa; --border: #374151; --input-bg: #374151;
+            --log-bg: #000000; --log-text: #4ade80;
+        }
+
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: var(--text); padding: 2rem; max-width: 1200px; margin: 0 auto; transition: 0.3s; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; }
+        h1 { margin: 0; font-size: 24px; }
+        
+        .btn-acao { background: var(--card-bg); color: var(--text); border: 2px solid var(--border); padding: 8px 12px; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.3s; }
+        .btn-acao:hover { border-color: var(--primary); }
+
+        .search-box { display: flex; gap: 10px; justify-content: center; margin-bottom: 1rem; flex-wrap: wrap; }
+        input[type="url"] { flex: 1; min-width: 300px; max-width: 500px; padding: 12px 20px; border: 2px solid var(--border); border-radius: 8px; background: var(--input-bg); color: var(--text); font-size: 16px; outline: none; }
+        input[type="url"]:focus { border-color: var(--primary); }
+        button.btn-search { padding: 12px 24px; background: var(--primary); color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; }
+        button.btn-search:disabled { filter: grayscale(0.5); cursor: not-allowed; }
+
+        .filters { display: flex; justify-content: center; gap: 20px; margin-bottom: 1rem; flex-wrap: wrap; }
+        .filters label { display: flex; align-items: center; gap: 5px; font-weight: bold; cursor: pointer; }
+        .filters input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; }
+
+        .controls-container { text-align: center; margin-bottom: 1rem; }
+        .log-box { display: none; background: var(--log-bg); color: var(--log-text); font-family: monospace; font-size: 13px; text-align: left; padding: 15px; border-radius: 8px; max-height: 250px; overflow-y: auto; margin-bottom: 1.5rem; border: 1px solid #333; }
+        .log-box.active { display: block; }
+        .log-entry { margin-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 4px; word-break: break-all; }
+        .log-page { color: #3b82f6; }
+        .log-file { color: #facc15; }
+
+        #status { text-align: center; margin-bottom: 1rem; font-weight: 500; font-size: 18px; }
+
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; }
+        .card { background: var(--card-bg); padding: 15px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); border: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; gap: 15px; }
+        
+        .img-container { width: 100%; height: 150px; border-radius: 8px; background-color: #f1f5f9; background-image: linear-gradient(45deg, #e5e5e5 25%, transparent 25%), linear-gradient(-45deg, #e5e5e5 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e5e5e5 75%), linear-gradient(-45deg, transparent 75%, #e5e5e5 75%); background-size: 20px 20px; background-position: 0 0, 0 10px, 10px -10px, -10px 0px; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 1px solid var(--border); }
+        .img-container img { max-width: 100%; max-height: 100%; object-fit: contain; }
+        
+        .file-icon { font-size: 32px; font-weight: 900; color: white; padding: 20px 10px; border-radius: 8px; text-transform: uppercase; letter-spacing: 2px; text-align: center; width: 80%; box-shadow: 0 4px 6px rgba(0,0,0,0.2); }
+        .bg-pdf { background: #ef4444; } .bg-ai { background: #f97316; } .bg-cdr { background: #16a34a; } .bg-eps { background: #8b5cf6; }
+        
+        .file-name { font-size: 12px; word-break: break-all; text-align: center; max-height: 3em; overflow: hidden; color: var(--text); opacity: 0.8; }
+        
+        /* Novos estilos para agrupar botões de Ação */
+        .btn-group { display: flex; gap: 8px; width: 100%; }
+        .btn-group a { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; text-decoration: none; color: white; padding: 10px; border-radius: 6px; font-size: 13px; font-weight: bold; transition: background 0.3s; box-sizing: border-box; }
+        .view-btn { background: #3b82f6; }
+        .view-btn:hover { background: #2563eb; }
+        .download-btn { background: #10b981; }
+        .download-btn:hover { background: #059669; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>🔍 Extrator Multi-Arquivos</h1>
+        <button class="btn-acao" onclick="toggleTema()" id="btnTema">🌙 Modo Noturno</button>
+    </div>
+    
+    <div class="search-box">
+        <input type="url" id="urlInput" placeholder="https://exemplo.com" required>
+        <button class="btn-search" id="searchBtn" onclick="vasculharSite()">Buscar Arquivos</button>
+    </div>
+
+    <div class="filters">
+        <label><input type="checkbox" value="svg" checked> .SVG</label>
+        <label><input type="checkbox" value="pdf" checked> .PDF</label>
+        <label><input type="checkbox" value="ai" checked> .AI</label>
+        <label><input type="checkbox" value="cdr" checked> .CDR</label>
+        <label><input type="checkbox" value="eps" checked> .EPS</label>
+    </div>
+
+    <div class="controls-container">
+        <button class="btn-acao" onclick="toggleLogs()">📋 Mostrar/Ocultar Terminal de Busca</button>
+    </div>
+    <div id="logBox" class="log-box"></div>
+
+    <div id="status"></div>
+    <div class="grid" id="results"></div>
+
+    <script>
+        function toggleTema() {
+            const isDark = document.body.classList.toggle('dark-mode');
+            document.getElementById('btnTema').innerText = isDark ? '☀️ Modo Claro' : '🌙 Modo Noturno';
+            localStorage.setItem('tema', isDark ? 'dark' : 'light');
+        }
+        if (localStorage.getItem('tema') === 'dark') {
+            document.body.classList.add('dark-mode');
+            document.getElementById('btnTema').innerText = '☀️ Modo Claro';
+        }
+
+        function toggleLogs() {
+            document.getElementById('logBox').classList.toggle('active');
+        }
+
+        function adicionarLog(mensagem, classe = '') {
+            const logBox = document.getElementById('logBox');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${classe}`;
+            entry.textContent = mensagem;
+            logBox.appendChild(entry);
+            logBox.scrollTop = logBox.scrollHeight; 
+        }
+
+        let evtSource = null;
+        let fileCount = 0;
+
+        function vasculharSite() {
+            const urlInput = document.getElementById('urlInput').value;
+            const statusEl = document.getElementById('status');
+            const resultsEl = document.getElementById('results');
+            const btn = document.getElementById('searchBtn');
+            const logBox = document.getElementById('logBox');
+
+            const checkboxes = document.querySelectorAll('.filters input:checked');
+            const tiposSelecionados = Array.from(checkboxes).map(cb => cb.value).join(',');
+
+            if (!urlInput || !tiposSelecionados) {
+                statusEl.innerHTML = '<span style="color:#ef4444">Insira a URL e selecione pelo menos 1 filtro!</span>';
+                return;
+            }
+
+            if (evtSource) evtSource.close();
+
+            btn.disabled = true;
+            btn.textContent = 'Vasculhando...';
+            statusEl.innerHTML = 'Iniciando robô...';
+            resultsEl.innerHTML = '';
+            logBox.innerHTML = ''; 
+            fileCount = 0;
+
+            adicionarLog(`[Sistema] Iniciando busca em: ${urlInput}`);
+
+            const queryParams = `url=${encodeURIComponent(urlInput)}&types=${tiposSelecionados}`;
+            evtSource = new EventSource(`/api/extrair-stream?${queryParams}`);
+
+            evtSource.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+
+                if (data.tipo === 'status') {
+                    statusEl.innerHTML = `<span style="color: var(--primary);">${data.mensagem}</span> <br><small>Fila: ${data.fila} links | Arquivos: <b>${fileCount}</b></small>`;
+                    adicionarLog(`[Escaneando] ${data.urlScan}`, 'log-page');
+                } 
+                else if (data.tipo === 'arquivo') {
+                    fileCount++;
+                    renderizarResultadoUnico(data.item, fileCount);
+                    adicionarLog(`[Encontrado .${data.item.extensao.toUpperCase()}] ${data.logSrc}`, 'log-file');
+                }
+                else if (data.tipo === 'fim') {
+                    evtSource.close();
+                    btn.disabled = false;
+                    btn.textContent = 'Buscar Arquivos';
+                    let msg = `<span style="color:#10b981">Busca finalizada! ${data.totalArquivos} arquivos encontrados.</span>`;
+                    if (data.limiteAtingido) {
+                        msg += `<br><small style="opacity:0.75">⏱️ Limite de tempo/páginas do servidor atingido — pode haver mais arquivos no site.</small>`;
+                    }
+                    statusEl.innerHTML = msg;
+                    adicionarLog(`[Sistema] Busca finalizada com sucesso.`);
+                }
+                else if (data.tipo === 'erro') {
+                    evtSource.close();
+                    btn.disabled = false;
+                    btn.textContent = 'Buscar Arquivos';
+                    statusEl.innerHTML = `<span style="color:#ef4444">${data.mensagem}</span>`;
+                    adicionarLog(`[Erro] ${data.mensagem}`);
+                }
+            };
+
+            evtSource.onerror = function() {
+                evtSource.close();
+                btn.disabled = false;
+                btn.textContent = 'Buscar Arquivos';
+                statusEl.innerHTML = `<span style="color:#ef4444">Conexão interrompida.</span>`;
+            };
+        }
+
+        function renderizarResultadoUnico(item, index) {
+            const resultsEl = document.getElementById('results');
+            const card = document.createElement('div');
+            card.className = 'card';
+
+            // URLs para Download e para Visualização (action=view)
+            const downloadUrl = `/api/download?ext=${item.extensao}&url=${encodeURIComponent(item.src)}`;
+            const viewUrl = `/api/download?ext=${item.extensao}&action=view&url=${encodeURIComponent(item.src)}`;
+            
+            let visualizacaoHTML = '';
+            let nomeArquivo = item.src.split('/').pop().split('?')[0];
+            
+            try { nomeArquivo = decodeURIComponent(nomeArquivo); } catch(e){}
+            if (!nomeArquivo || nomeArquivo.length > 30 || item.inline) nomeArquivo = `Arquivo.${item.extensao}`;
+
+            if (item.extensao === 'svg') {
+                visualizacaoHTML = `<img src="${item.src}" alt="Vetor ${index}" loading="lazy" onerror="this.style.display='none'">`;
+            } else {
+                visualizacaoHTML = `<div class="file-icon bg-${item.extensao}">${item.extensao}</div>`;
+            }
+
+            // Define os botões baseados no tipo do arquivo
+            let botoesHTML = '';
+            if (item.extensao === 'svg' || item.extensao === 'pdf') {
+                botoesHTML = `
+                    <div class="btn-group">
+                        <a href="${viewUrl}" target="_blank" class="view-btn">
+                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" style="width:16px" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                            Ver
+                        </a>
+                        <a href="${downloadUrl}" class="download-btn" download="${nomeArquivo}">
+                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" style="width:16px" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                            Salvar
+                        </a>
+                    </div>
+                `;
+            } else {
+                botoesHTML = `
+                    <div class="btn-group">
+                        <a href="${downloadUrl}" class="download-btn" download="${nomeArquivo}">
+                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" style="width:16px" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                            Download
+                        </a>
+                    </div>
+                `;
+            }
+
+            card.innerHTML = `
+                <div class="img-container">
+                    ${visualizacaoHTML}
+                </div>
+                <div class="file-name" title="${nomeArquivo}">${nomeArquivo}</div>
+                ${botoesHTML}
+            `;
+            resultsEl.appendChild(card);
+        }
+    </script>
+</body>
+</html>

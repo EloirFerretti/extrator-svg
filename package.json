@@ -1,0 +1,19 @@
+{
+  "name": "extrator-svg",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Extrai arquivos SVG, PDF, AI, EPS e CDR de sites. Adaptado para deploy serverless na Vercel.",
+  "type": "commonjs",
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "dependencies": {
+    "@sparticuz/chromium-min": "148.0.0",
+    "axios": "^1.7.9",
+    "cheerio": "^1.2.0",
+    "puppeteer-core": "^24.15.0"
+  }
+}
