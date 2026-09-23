@@ -1,6 +1,7 @@
 'use strict';
 
 const cheerio = require('cheerio');
+const axios = require('axios');
 const { lancarNavegador } = require('../lib/browser');
 
 // Margem de segurança abaixo do "maxDuration" configurado em vercel.json
@@ -19,8 +20,15 @@ const TIMEOUT_PAGINA_MS = 15000;
 const MAX_PAGINAS_PADRAO = 3000;
 const MAX_PAGINAS_LIMITE = 20000;
 
-// Hash curto (FNV-1a) só pra deduplicar página/arquivo já vistos sem
-// precisar carregar a URL/conteúdo inteiro de volta a cada rodada.
+// Quantas checagens de rede (assinatura de SVG / nome+tamanho de arquivo)
+// rodam em paralelo por página. Mantém o crawler rápido sem sobrecarregar o
+// site de origem.
+const CONCORRENCIA_ENRIQUECIMENTO = 5;
+
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+
+// Hash curto (FNV-1a) usado tanto pra deduplicar página/arquivo já vistos
+// entre rodadas quanto pra gerar a "assinatura" de conteúdo de um SVG.
 function hashCurto(str) {
   let h = 0x811c9dc5;
   for (let i = 0; i < str.length; i++) {
@@ -28,6 +36,112 @@ function hashCurto(str) {
     h = Math.imul(h, 0x01000193);
   }
   return (h >>> 0).toString(36);
+}
+
+// Roda fn(item) para cada item em "itens", no máximo "limite" execuções
+// simultâneas, preservando a ordem de processamento apenas por disponibilidade
+// (não por índice) — usado pra buscar em paralelo, sem sequência importar.
+async function mapComLimite(itens, limite, fn) {
+  let indice = 0;
+  async function trabalhador() {
+    while (indice < itens.length) {
+      const i = indice++;
+      await fn(itens[i], i);
+    }
+  }
+  const trabalhadores = Array.from({ length: Math.min(limite, itens.length) }, () => trabalhador());
+  await Promise.all(trabalhadores);
+}
+
+// Assinatura de conteúdo de um SVG a partir das tags <path>: concatena o
+// atributo "d" de cada <path> (normalizando espaços) e tira um hash. Dois
+// SVGs com os mesmos caminhos geram a mesma assinatura mesmo que tenham
+// ids/classes/cores diferentes — o que costuma acontecer quando o mesmo
+// ícone é reexportado ou embutido de formas ligeiramente diferentes pelo
+// site. Retorna null se não achar nenhuma tag <path> (nesse caso o cliente
+// cai pro nome do arquivo como heurística de duplicidade).
+function assinaturaDoConteudoSvg(conteudoSvg) {
+  try {
+    const $svg = cheerio.load(conteudoSvg, { xmlMode: true });
+    const caminhos = [];
+    $svg('path').each((_, el) => {
+      const d = $svg(el).attr('d');
+      if (d) caminhos.push(d.replace(/\s+/g, ' ').trim());
+    });
+    if (caminhos.length === 0) return null;
+    return hashCurto(caminhos.join('|'));
+  } catch (e) {
+    return null;
+  }
+}
+
+// Mesma ideia, mas pra um <svg> já presente no HTML da página (SVG embutido).
+function assinaturaDeElementoSvg($, el) {
+  const caminhos = [];
+  $(el)
+    .find('path')
+    .each((_, p) => {
+      const d = $(p).attr('d');
+      if (d) caminhos.push(d.replace(/\s+/g, ' ').trim());
+    });
+  if (caminhos.length === 0) return null;
+  return hashCurto(caminhos.join('|'));
+}
+
+function extrairNomeDeContentDisposition(cabecalho) {
+  if (!cabecalho) return null;
+  const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cabecalho);
+  if (!match || !match[1]) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch (e) {
+    return match[1];
+  }
+}
+
+// Busca informações extras de um arquivo LINKADO (por URL):
+//  - SVG: baixa o conteúdo (GET) pra montar a assinatura por <path> e usa o
+//    próprio tamanho do conteúdo baixado.
+//  - Outros formatos (pdf/ai/eps/cdr): faz um HEAD só pra ler os cabeçalhos
+//    Content-Disposition (nome real do arquivo, quando o site informa) e
+//    Content-Length (tamanho), sem baixar o arquivo inteiro.
+// Falhas de rede (timeout, CORS do lado do servidor, 404, HEAD bloqueado
+// etc.) são silenciosas: o item simplesmente fica sem essa informação extra
+// e o cliente usa os fallbacks (nome vindo da URL, sem tamanho, dedupe por
+// nome de arquivo).
+async function enriquecerCandidato(candidato) {
+  const resultado = { assinatura: null, nomeArquivo: null, tamanhoBytes: null };
+
+  if (candidato.extensao === 'svg') {
+    try {
+      const resp = await axios.get(candidato.src, {
+        timeout: 6000,
+        responseType: 'text',
+        maxContentLength: 3 * 1024 * 1024,
+        maxRedirects: 5,
+        headers: { 'User-Agent': USER_AGENT },
+      });
+      resultado.assinatura = assinaturaDoConteudoSvg(resp.data);
+      resultado.tamanhoBytes = Buffer.byteLength(resp.data, 'utf8');
+    } catch (e) {
+      // sem assinatura/tamanho — segue com os fallbacks do cliente
+    }
+    return resultado;
+  }
+
+  try {
+    const resp = await axios.head(candidato.src, {
+      timeout: 4000,
+      maxRedirects: 5,
+      headers: { 'User-Agent': USER_AGENT },
+    });
+    resultado.nomeArquivo = extrairNomeDeContentDisposition(resp.headers['content-disposition']);
+    const tamanho = resp.headers['content-length'];
+    if (tamanho) resultado.tamanhoBytes = parseInt(tamanho, 10) || null;
+  } catch (e) {
+    // HEAD pode falhar em alguns servidores — segue sem nome/tamanho extra
+  }
+  return resultado;
 }
 
 module.exports = async (req, res) => {
@@ -114,7 +228,7 @@ module.exports = async (req, res) => {
 
     browser = await lancarNavegador();
     const page = await browser.newPage();
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+    await page.setUserAgent(USER_AGENT);
 
     while (filaUrls.length > 0 && !cancelado) {
       if (Date.now() - inicio > DURACAO_MAXIMA_MS) {
@@ -141,13 +255,15 @@ module.exports = async (req, res) => {
         const html = await page.content();
         const $ = cheerio.load(html);
 
-        const processarArquivo = (novoItem) => {
-          const chave = hashCurto(JSON.stringify(novoItem));
-          if (!encontradosHashes.has(chave)) {
-            encontradosHashes.add(chave);
-            const logSrc = novoItem.inline ? 'SVG Embutido (Código Base64)' : novoItem.src;
-            enviar({ tipo: 'arquivo', item: novoItem, logSrc });
-          }
+        const itensProntos = [];
+        const candidatosLinkados = [];
+        const vistosNestaPagina = new Set();
+
+        const adicionarCandidatoLinkado = (extensao, srcAbsoluto) => {
+          const chave = extensao + '|' + srcAbsoluto;
+          if (vistosNestaPagina.has(chave)) return;
+          vistosNestaPagina.add(chave);
+          candidatosLinkados.push({ extensao, src: srcAbsoluto });
         };
 
         if (tiposPermitidos.includes('svg')) {
@@ -155,15 +271,23 @@ module.exports = async (req, res) => {
             const src = $(el).attr('src');
             if (src && src.toLowerCase().includes('.svg')) {
               try {
-                processarArquivo({ extensao: 'svg', src: new URL(src, urlAtual).href, inline: false });
+                adicionarCandidatoLinkado('svg', new URL(src, urlAtual).href);
               } catch (e) {}
             }
           });
 
           $('svg').each((_, el) => {
             $(el).attr('xmlns', 'http://www.w3.org/2000/svg');
-            const base64 = Buffer.from($.html(el)).toString('base64');
-            processarArquivo({ extensao: 'svg', src: `data:image/svg+xml;base64,${base64}`, inline: true });
+            const svgHtml = $.html(el);
+            const base64 = Buffer.from(svgHtml).toString('base64');
+            itensProntos.push({
+              extensao: 'svg',
+              src: `data:image/svg+xml;base64,${base64}`,
+              inline: true,
+              assinatura: assinaturaDeElementoSvg($, el),
+              nomeArquivo: null,
+              tamanhoBytes: Buffer.byteLength(svgHtml, 'utf8'),
+            });
           });
         }
 
@@ -176,7 +300,7 @@ module.exports = async (req, res) => {
           );
           if (extensaoEncontrada) {
             try {
-              processarArquivo({ extensao: extensaoEncontrada, src: new URL(link, urlAtual).href, inline: false });
+              adicionarCandidatoLinkado(extensaoEncontrada, new URL(link, urlAtual).href);
             } catch (e) {}
           }
 
@@ -193,6 +317,36 @@ module.exports = async (req, res) => {
               }
             }
           } catch (e) {}
+        });
+
+        if (candidatosLinkados.length > 0) {
+          enviar({
+            tipo: 'status',
+            mensagem: `Verificando ${candidatosLinkados.length} arquivo(s) desta página (nome, tamanho e duplicidade)...`,
+            urlScan: urlAtual,
+            fila: filaUrls.length,
+          });
+
+          await mapComLimite(candidatosLinkados, CONCORRENCIA_ENRIQUECIMENTO, async (candidato) => {
+            const extra = await enriquecerCandidato(candidato);
+            itensProntos.push({
+              extensao: candidato.extensao,
+              src: candidato.src,
+              inline: false,
+              assinatura: extra.assinatura,
+              nomeArquivo: extra.nomeArquivo,
+              tamanhoBytes: extra.tamanhoBytes,
+            });
+          });
+        }
+
+        itensProntos.forEach((item) => {
+          const chaveGlobal = hashCurto(item.extensao + '|' + item.src);
+          if (!encontradosHashes.has(chaveGlobal)) {
+            encontradosHashes.add(chaveGlobal);
+            const logSrc = item.inline ? 'SVG Embutido (Código Base64)' : item.src;
+            enviar({ tipo: 'arquivo', item, logSrc });
+          }
         });
       } catch (erroPagina) {
         // ignora página com erro/timeout e segue para a próxima da fila
