@@ -13,8 +13,10 @@ direto** na Vercel por três motivos, e foi isso que foi adaptado:
    liga, responde e desliga. O `server.js` único virou duas funções em `/api`:
    - `api/extrair-stream.js` — o crawler (SSE), antes em `/api/extrair-stream`.
    - `api/download.js` — o proxy de download/visualização, antes em `/api/download`.
-   O `public/index.html` continua igual (é servido como arquivo estático pela
-   Vercel automaticamente) e chama exatamente as mesmas URLs de antes.
+   O `public/index.html` é servido como arquivo estático pela Vercel
+   automaticamente e chama essas mesmas rotas — só que via `fetch` com POST
+   em vez de `EventSource` (GET), porque a busca agora manda de volta pro
+   servidor o estado da continuação a cada rodada (ver item 3).
 
 2. **`puppeteer` completo é grande demais.** Ele baixa um Chromium de ~300 MB,
    e o limite de uma função na Vercel é 250 MB. Troquei para
@@ -25,25 +27,54 @@ direto** na Vercel por três motivos, e foi isso que foi adaptado:
    variável de ambiente `CHROME_EXECUTABLE_PATH`).
 
 3. **Funções seriam mortas no meio do crawling.** O `while` original varria o
-   site inteiro sem limite de tempo — ótimo num servidor próprio, perigoso numa
-   função serverless com tempo máximo de execução. Agora o crawler:
-   - para sozinho ~20s antes do limite configurado (`maxDuration: 300` em
-     `vercel.json`), fechando o navegador e avisando o front-end (`limiteAtingido: true`)
-     em vez de ser morto no meio;
-   - tem um limite de páginas por busca (padrão 40, configurável via
-     `?maxPages=` na URL da API, teto de 150) para não rodar indefinidamente em
-     sites muito grandes.
+   site inteiro sem limite de tempo — ótimo num servidor próprio, mas uma
+   função na Vercel tem um teto de execução (`maxDuration`, no máximo 300s no
+   Hobby). Um site grande nunca terminaria numa chamada só. A solução: o
+   crawler roda em **rodadas encadeadas**. Quando o tempo de uma rodada
+   acaba, o servidor manda de volta pro navegador a fila de páginas ainda não
+   visitadas (compactada em hashes curtos); o navegador então dispara
+   automaticamente uma nova requisição continuando exatamente de onde parou,
+   e assim por diante até o site inteiro ser vasculhado — sem o usuário
+   precisar fazer nada, do ponto de vista dele é uma busca contínua só. Existe
+   um limite de segurança GLOBAL de páginas (padrão 3000, teto 20000, ver
+   `MAX_PAGINAS_PADRAO`/`MAX_PAGINAS_LIMITE` em `api/extrair-stream.js`) só
+   pra evitar rodar pra sempre em sites com espaço de URLs praticamente
+   infinito (calendários, filtros combinatórios etc).
 
 ## Paginação dos resultados
 
-Os itens continuam chegando em tempo real via SSE, mas agora ficam guardados
-num array no navegador e só a página atual (30 itens, ver `ITENS_POR_PAGINA`
-em `public/index.html`) é desenhada no DOM. Isso evita que a aba do navegador
+Os itens continuam chegando em tempo real, mas agora ficam guardados num
+array no navegador e só a página atual (30 itens, ver `ITENS_POR_PAGINA` em
+`public/index.html`) é desenhada no DOM. Isso evita que a aba do navegador
 trave quando o site tem centenas/milhares de arquivos — sem isso, cada item
 virava um card novo direto na tela e o navegador acumulava todos de uma vez.
-Enquanto o usuário estiver na última página, novos itens continuam aparecendo
-"ao vivo"; se ele navegar para uma página anterior, a busca continua rodando
-em segundo plano e os controles de paginação só atualizam a contagem.
+Como os mais recentes aparecem na página 1 (ver "Ordem dos resultados"
+abaixo), é ela que atualiza "ao vivo" enquanto a busca roda; se o usuário
+navegar para outra página, a busca continua em segundo plano e os controles
+de paginação só atualizam a contagem, sem tirar o usuário do lugar.
+
+## Ordem dos resultados
+
+Os arquivos mais recentemente encontrados aparecem nas primeiras páginas; os
+mais antigos vão ficando nas últimas. Isso é calculado sem copiar/inverter a
+lista inteira a cada item novo (ver `obterItensDaPagina` em
+`public/index.html`), então continua rápido mesmo com milhares de arquivos.
+
+## Detecção de duplicados
+
+Cada arquivo encontrado ganha uma "chave de duplicata":
+- **SVG embutido** (`inline: true`): hash do próprio conteúdo do SVG — exato,
+  já que o conteúdo inteiro já está disponível (não precisa baixar nada).
+- **Arquivo linkado** (SVG/PDF/AI/EPS/CDR por URL): nome do arquivo (última
+  parte do caminho). É uma heurística — não baixa o arquivo remoto pra
+  comparar byte a byte, então dois arquivos diferentes que por acaso têm o
+  mesmo nome (ex.: `icon.svg` genérico usado em contextos diferentes) podem
+  ser marcados como duplicados sem serem exatamente iguais.
+
+Quando há pelo menos 1 duplicado, aparece um checkbox "Ocultar arquivos
+duplicados" acima dos resultados, com a contagem ao lado. Os duplicados
+ficam visualmente marcados (borda tracejada + selo "🔁 Duplicado") mesmo
+quando não estão ocultos.
 
 ## Deploy
 
@@ -123,6 +154,14 @@ serviço de terceiros ficar no ar. Se quiser eliminar essa dependência:
   (sem `^`) em `package.json`/`lib/browser.js` de propósito; se for atualizar,
   atualize `CHROMIUM_MIN_VERSION`/`PACOTE_CHROMIUM_URL` em `lib/browser.js` e a
   versão do pacote em `package.json` juntas, e teste antes de ir para produção.
-- **Sites muito grandes terminam com `limiteAtingido: true`:** é esperado —
-  aumente `maxPages` na URL da API e/ou o `maxDuration` em `vercel.json`
-  (dentro do limite do seu plano).
+- **Sites muito grandes terminam com `limiteAtingido: true`:** agora só
+  acontece se o limite de segurança GLOBAL de páginas for atingido (padrão
+  3000). Aumente `MAX_PAGINAS_PADRAO` (ou mande `maxPages` no corpo do
+  primeiro POST) em `api/extrair-stream.js` se precisar de mais.
+- **Busca de site grande demora bastante / parece "reconectar" várias
+  vezes:** é esperado — cada rodada dura no máximo ~280s (uma invocação da
+  função), e o front-end encadeia automaticamente novas rodadas até acabar a
+  fila de páginas ou bater no limite global. Um log "[Sistema] Ainda há
+  páginas na fila — continuando automaticamente..." aparece no terminal de
+  busca a cada troca de rodada. A aba do navegador precisa continuar aberta
+  até o fim.
