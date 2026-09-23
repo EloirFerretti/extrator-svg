@@ -4,15 +4,35 @@ const cheerio = require('cheerio');
 const { lancarNavegador } = require('../lib/browser');
 
 // Margem de segurança abaixo do "maxDuration" configurado em vercel.json
-// (300s). Paramos um pouco antes para conseguir fechar o browser e enviar o
-// evento "fim" antes da Vercel matar a função à força.
+// (300s). Cada função individual só tem esse tempo pra rodar — por isso o
+// crawler é dividido em "rodadas": quando o tempo de uma rodada acaba e
+// ainda sobram páginas na fila, o servidor manda o estado da busca de volta
+// pro navegador, que abre uma NOVA requisição pra continuar de onde parou.
+// Do ponto de vista do usuário é uma busca só, contínua.
 const DURACAO_MAXIMA_MS = 280 * 1000;
 const TIMEOUT_PAGINA_MS = 15000;
-const MAX_PAGINAS_PADRAO = 40;
-const MAX_PAGINAS_LIMITE = 150;
+
+// Limite de segurança GLOBAL, somado entre TODAS as rodadas de uma mesma
+// busca (não por rodada). Existe só pra evitar rodar pra sempre em sites com
+// espaços de URL praticamente infinitos (calendários, filtros combinatórios
+// etc). Pode ser ajustado via "maxPages" no corpo do primeiro request.
+const MAX_PAGINAS_PADRAO = 3000;
+const MAX_PAGINAS_LIMITE = 20000;
+
+// Hash curto (FNV-1a) só pra deduplicar página/arquivo já vistos sem
+// precisar carregar a URL/conteúdo inteiro de volta a cada rodada.
+function hashCurto(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
+}
 
 module.exports = async (req, res) => {
-  const { url, types, maxPages } = req.query;
+  const corpo = req.method === 'POST' ? req.body || {} : req.query || {};
+  const { url, types, maxPages, estado } = corpo;
 
   if (!url) {
     res.status(400).send('URL não fornecida.');
@@ -31,7 +51,7 @@ module.exports = async (req, res) => {
   }
 
   const tiposPermitidos = types ? String(types).split(',') : ['svg'];
-  const limitePaginas = Math.min(
+  const limiteGlobalPaginas = Math.min(
     Math.max(parseInt(maxPages, 10) || MAX_PAGINAS_PADRAO, 1),
     MAX_PAGINAS_LIMITE
   );
@@ -41,7 +61,6 @@ module.exports = async (req, res) => {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache, no-transform',
     Connection: 'keep-alive',
-    // Evita que proxies/CDNs façam buffering da resposta em streaming.
     'X-Accel-Buffering': 'no',
   });
 
@@ -53,7 +72,32 @@ module.exports = async (req, res) => {
     }
   };
 
-  enviar({ tipo: 'status', mensagem: 'Iniciando robô...', urlScan: urlInicial.href, fila: 0 });
+  const dominioAlvo = urlInicial.hostname;
+
+  // Reidrata o estado de uma rodada anterior (continuação) ou começa do zero.
+  let filaUrls;
+  let visitadosHashes;
+  let encontradosHashes;
+  let totalPaginasAcumulado;
+
+  if (estado && Array.isArray(estado.filaUrls)) {
+    filaUrls = estado.filaUrls.slice();
+    visitadosHashes = new Set(estado.visitadosHashes || []);
+    encontradosHashes = new Set(estado.encontradosHashes || []);
+    totalPaginasAcumulado = estado.totalPaginas || 0;
+    enviar({
+      tipo: 'status',
+      mensagem: 'Retomando busca de onde parou...',
+      urlScan: filaUrls[0] || '',
+      fila: filaUrls.length,
+    });
+  } else {
+    filaUrls = [urlInicial.href];
+    visitadosHashes = new Set([hashCurto(urlInicial.href)]);
+    encontradosHashes = new Set();
+    totalPaginasAcumulado = 0;
+    enviar({ tipo: 'status', mensagem: 'Iniciando robô...', urlScan: urlInicial.href, fila: 0 });
+  }
 
   let browser;
   let cancelado = false;
@@ -65,13 +109,8 @@ module.exports = async (req, res) => {
   });
 
   try {
-    const dominioAlvo = urlInicial.hostname;
-    const filaUrls = [urlInicial.href];
-    const urlsVisitadas = new Set([urlInicial.href]);
-    const arquivosEncontrados = new Set();
-
-    let paginasVasculhadas = 0;
-    let tempoEsgotado = false;
+    let paginasNestaRodada = 0;
+    let motivoParada = null; // 'tempo' | 'limiteGlobal' | null (fila esvaziou = fim natural)
 
     browser = await lancarNavegador();
     const page = await browser.newPage();
@@ -79,17 +118,20 @@ module.exports = async (req, res) => {
 
     while (filaUrls.length > 0 && !cancelado) {
       if (Date.now() - inicio > DURACAO_MAXIMA_MS) {
-        tempoEsgotado = true;
+        motivoParada = 'tempo';
         break;
       }
-      if (paginasVasculhadas >= limitePaginas) break;
+      if (totalPaginasAcumulado + paginasNestaRodada >= limiteGlobalPaginas) {
+        motivoParada = 'limiteGlobal';
+        break;
+      }
 
       const urlAtual = filaUrls.shift();
-      paginasVasculhadas++;
+      paginasNestaRodada++;
 
       enviar({
         tipo: 'status',
-        mensagem: `Vasculhando página ${paginasVasculhadas}...`,
+        mensagem: `Vasculhando página ${totalPaginasAcumulado + paginasNestaRodada}...`,
         urlScan: urlAtual,
         fila: filaUrls.length,
       });
@@ -100,9 +142,9 @@ module.exports = async (req, res) => {
         const $ = cheerio.load(html);
 
         const processarArquivo = (novoItem) => {
-          const itemString = JSON.stringify(novoItem);
-          if (!arquivosEncontrados.has(itemString)) {
-            arquivosEncontrados.add(itemString);
+          const chave = hashCurto(JSON.stringify(novoItem));
+          if (!encontradosHashes.has(chave)) {
+            encontradosHashes.add(chave);
             const logSrc = novoItem.inline ? 'SVG Embutido (Código Base64)' : novoItem.src;
             enviar({ tipo: 'arquivo', item: novoItem, logSrc });
           }
@@ -143,9 +185,10 @@ module.exports = async (req, res) => {
               const novaUrlObj = new URL(link, urlAtual);
               novaUrlObj.hash = '';
               const novaUrl = novaUrlObj.href;
+              const chaveUrl = hashCurto(novaUrl);
 
-              if (novaUrlObj.hostname === dominioAlvo && !urlsVisitadas.has(novaUrl)) {
-                urlsVisitadas.add(novaUrl);
+              if (novaUrlObj.hostname === dominioAlvo && !visitadosHashes.has(chaveUrl)) {
+                visitadosHashes.add(chaveUrl);
                 filaUrls.push(novaUrl);
               }
             }
@@ -156,12 +199,31 @@ module.exports = async (req, res) => {
       }
     }
 
-    if (!cancelado) {
+    const totalPaginasFinal = totalPaginasAcumulado + paginasNestaRodada;
+
+    if (cancelado) {
+      // cliente desconectou (abort/fechou a aba) — nada a enviar
+    } else if (motivoParada === 'tempo' && filaUrls.length > 0) {
+      // Ainda há páginas na fila, mas o tempo desta invocação acabou: manda
+      // o estado compactado para o cliente encadear a próxima rodada.
+      enviar({
+        tipo: 'continuar',
+        totalPaginas: totalPaginasFinal,
+        estado: {
+          filaUrls,
+          visitadosHashes: Array.from(visitadosHashes),
+          encontradosHashes: Array.from(encontradosHashes),
+          totalPaginas: totalPaginasFinal,
+        },
+      });
+      res.end();
+    } else {
+      // Fila esvaziou (busca realmente terminou) ou bateu no limite global.
       enviar({
         tipo: 'fim',
-        totalArquivos: arquivosEncontrados.size,
-        totalPaginas: paginasVasculhadas,
-        limiteAtingido: tempoEsgotado || paginasVasculhadas >= limitePaginas,
+        totalArquivos: encontradosHashes.size,
+        totalPaginas: totalPaginasFinal,
+        limiteAtingido: motivoParada === 'limiteGlobal',
       });
       res.end();
     }
