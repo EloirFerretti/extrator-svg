@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Extrator Multi-Arquivos</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
         :root { 
             --bg: #f8f9fa; --text: #1f2937; --card-bg: #ffffff;
@@ -24,6 +25,7 @@
         
         .btn-acao { background: var(--card-bg); color: var(--text); border: 2px solid var(--border); padding: 8px 12px; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.3s; }
         .btn-acao:hover { border-color: var(--primary); }
+        .btn-acao:disabled { opacity: 0.5; cursor: not-allowed; }
 
         .search-box { display: flex; gap: 10px; justify-content: center; margin-bottom: 1rem; flex-wrap: wrap; }
         input[type="url"] { flex: 1; min-width: 300px; max-width: 500px; padding: 12px 20px; border: 2px solid var(--border); border-radius: 8px; background: var(--input-bg); color: var(--text); font-size: 16px; outline: none; }
@@ -35,10 +37,22 @@
         .filters label { display: flex; align-items: center; gap: 5px; font-weight: bold; cursor: pointer; }
         .filters input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; }
 
-        .dup-controls { display: none; justify-content: center; align-items: center; gap: 10px; margin-bottom: 1rem; flex-wrap: wrap; font-size: 14px; }
-        .dup-controls label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
-        .dup-controls input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
-        .dup-controls span { opacity: 0.75; }
+        /* Painel de filtros de EXIBIÇÃO (aparece quando os resultados começam a chegar) */
+        .painel-exibicao { display: none; flex-direction: column; align-items: center; gap: 10px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; margin-bottom: 1rem; }
+        .painel-exibicao .linha { display: flex; justify-content: center; align-items: center; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+        .painel-exibicao .titulo { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.6; font-weight: bold; }
+        .painel-exibicao label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+        .painel-exibicao input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+        .painel-exibicao .contagem { opacity: 0.6; font-size: 12px; }
+        .painel-exibicao .separador { width: 1px; height: 18px; background: var(--border); }
+
+        /* Barra de seleção múltipla */
+        .barra-selecao { display: none; justify-content: center; align-items: center; gap: 12px; background: var(--primary); color: #fff; border-radius: 10px; padding: 10px 16px; margin-bottom: 1rem; flex-wrap: wrap; }
+        .barra-selecao button { background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.4); padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 13px; }
+        .barra-selecao button:hover:not(:disabled) { background: rgba(255,255,255,0.3); }
+        .barra-selecao button:disabled { opacity: 0.6; cursor: not-allowed; }
+        .barra-selecao span { font-size: 14px; font-weight: bold; }
+        .barra-selecao .status-zip { font-weight: normal; opacity: 0.9; }
 
         .controls-container { text-align: center; margin-bottom: 1rem; }
         .log-box { display: none; background: var(--log-bg); color: var(--log-text); font-family: monospace; font-size: 13px; text-align: left; padding: 15px; border-radius: 8px; max-height: 250px; overflow-y: auto; margin-bottom: 1.5rem; border: 1px solid #333; }
@@ -50,21 +64,23 @@
         #status { text-align: center; margin-bottom: 1rem; font-weight: 500; font-size: 18px; }
 
         .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; }
-        .card { background: var(--card-bg); padding: 15px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); border: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; gap: 15px; }
+        .card { background: var(--card-bg); padding: 15px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); border: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; gap: 10px; }
         .card.duplicado { border-style: dashed; opacity: 0.8; }
+        .card.selecionado { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary); }
         
         .img-container { position: relative; width: 100%; height: 150px; border-radius: 8px; background-color: #f1f5f9; background-image: linear-gradient(45deg, #e5e5e5 25%, transparent 25%), linear-gradient(-45deg, #e5e5e5 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e5e5e5 75%), linear-gradient(-45deg, transparent 75%, #e5e5e5 75%); background-size: 20px 20px; background-position: 0 0, 0 10px, 10px -10px, -10px 0px; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 1px solid var(--border); }
         .img-container img { max-width: 100%; max-height: 100%; object-fit: contain; }
         .badge-duplicado { position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,0.7); color: #fff; font-size: 10px; font-weight: bold; padding: 3px 6px; border-radius: 4px; z-index: 2; }
+        .checkbox-selecao { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; cursor: pointer; z-index: 2; accent-color: var(--primary); }
         
         .file-icon { font-size: 32px; font-weight: 900; color: white; padding: 20px 10px; border-radius: 8px; text-transform: uppercase; letter-spacing: 2px; text-align: center; width: 80%; box-shadow: 0 4px 6px rgba(0,0,0,0.2); }
         .bg-pdf { background: #ef4444; } .bg-ai { background: #f97316; } .bg-cdr { background: #16a34a; } .bg-eps { background: #8b5cf6; }
         
-        .file-name { font-size: 12px; word-break: break-all; text-align: center; max-height: 3em; overflow: hidden; color: var(--text); opacity: 0.8; }
+        .file-name { font-size: 12px; word-break: break-all; text-align: center; max-height: 3em; overflow: hidden; color: var(--text); opacity: 0.85; width: 100%; }
+        .file-size { font-size: 11px; text-align: center; color: var(--text); opacity: 0.55; margin-top: -6px; }
         
-        /* Novos estilos para agrupar botões de Ação */
         .btn-group { display: flex; gap: 8px; width: 100%; }
-        .btn-group a { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; text-decoration: none; color: white; padding: 10px; border-radius: 6px; font-size: 13px; font-weight: bold; transition: background 0.3s; box-sizing: border-box; }
+        .btn-group a, .btn-group button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; text-decoration: none; color: white; padding: 10px; border-radius: 6px; font-size: 13px; font-weight: bold; transition: background 0.3s; box-sizing: border-box; border: none; cursor: pointer; font-family: inherit; }
         .view-btn { background: #3b82f6; }
         .view-btn:hover { background: #2563eb; }
         .download-btn { background: #10b981; }
@@ -75,6 +91,28 @@
         .pagination button:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
         .pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
         .pagination span { font-size: 14px; opacity: 0.85; white-space: nowrap; }
+
+        /* Modal de visualização */
+        .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.88); z-index: 1000; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box; }
+        .modal-conteudo { background: var(--card-bg); border-radius: 12px; width: 100%; max-width: 900px; max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; }
+        .modal-corpo { flex: 1; display: flex; align-items: center; justify-content: center; background: repeating-conic-gradient(#e5e5e5 0% 25%, #f1f5f9 0% 50%) 50% / 20px 20px; min-height: 300px; overflow: auto; padding: 20px; box-sizing: border-box; }
+        .modal-corpo img { max-width: 100%; max-height: 65vh; object-fit: contain; }
+        .modal-corpo iframe { width: 100%; height: 65vh; border: none; background: #fff; border-radius: 6px; }
+        .modal-sem-preview { text-align: center; padding: 40px 20px; color: var(--text); }
+        .modal-sem-preview p { opacity: 0.7; margin-bottom: 16px; }
+        .modal-rodape { padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 13px; border-top: 1px solid var(--border); color: var(--text); flex-wrap: wrap; }
+        .modal-rodape .modal-nome { font-weight: bold; word-break: break-all; }
+        .modal-rodape .modal-info { opacity: 0.6; white-space: nowrap; }
+        .modal-fechar { position: absolute; top: 16px; right: 16px; background: rgba(255,255,255,0.15); color: #fff; border: none; font-size: 26px; line-height: 1; width: 42px; height: 42px; border-radius: 50%; cursor: pointer; z-index: 1001; }
+        .modal-fechar:hover { background: rgba(255,255,255,0.3); }
+        .modal-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(255,255,255,0.15); color: #fff; border: none; font-size: 30px; width: 48px; height: 48px; border-radius: 50%; cursor: pointer; z-index: 1001; }
+        .modal-nav:hover { background: rgba(255,255,255,0.3); }
+        .modal-nav-esq { left: 16px; }
+        .modal-nav-dir { right: 16px; }
+        @media (max-width: 640px) {
+            .modal-nav { width: 38px; height: 38px; font-size: 22px; }
+            .modal-fechar { width: 36px; height: 36px; font-size: 20px; top: 8px; right: 8px; }
+        }
     </style>
 </head>
 <body>
@@ -97,12 +135,32 @@
         <label><input type="checkbox" value="eps" checked> .EPS</label>
     </div>
 
-    <div class="dup-controls" id="dupControls">
-        <label title="Considera duplicado quando o SVG embutido tem exatamente o mesmo conteúdo, ou quando um arquivo linkado tem o mesmo nome de outro já encontrado. Não baixa os arquivos pra comparar byte a byte.">
-            <input type="checkbox" id="chkOcultarDuplicados" onchange="alternarOcultarDuplicados()">
-            Ocultar arquivos duplicados
-        </label>
-        <span id="infoDuplicados"></span>
+    <!-- Filtros de EXIBIÇÃO: só controlam o que já foi encontrado, não a busca em si -->
+    <div class="painel-exibicao" id="painelExibicao">
+        <div class="linha">
+            <span class="titulo">Mostrar:</span>
+            <label><input type="checkbox" class="chk-ext" value="svg" checked onchange="alternarExtensaoVisivel(this)"> SVG <span class="contagem" id="cont-svg"></span></label>
+            <label><input type="checkbox" class="chk-ext" value="pdf" checked onchange="alternarExtensaoVisivel(this)"> PDF <span class="contagem" id="cont-pdf"></span></label>
+            <label><input type="checkbox" class="chk-ext" value="ai" checked onchange="alternarExtensaoVisivel(this)"> AI <span class="contagem" id="cont-ai"></span></label>
+            <label><input type="checkbox" class="chk-ext" value="cdr" checked onchange="alternarExtensaoVisivel(this)"> CDR <span class="contagem" id="cont-cdr"></span></label>
+            <label><input type="checkbox" class="chk-ext" value="eps" checked onchange="alternarExtensaoVisivel(this)"> EPS <span class="contagem" id="cont-eps"></span></label>
+        </div>
+        <div class="linha" id="linhaDuplicados" style="display:none">
+            <div class="separador"></div>
+            <label title="Considera duplicado quando o desenho (tags <path>) do SVG é idêntico, ou quando um arquivo linkado tem o mesmo nome de outro já encontrado.">
+                <input type="checkbox" id="chkOcultarDuplicados" onchange="alternarOcultarDuplicados()">
+                Ocultar duplicados
+            </label>
+            <span class="contagem" id="infoDuplicados"></span>
+        </div>
+    </div>
+
+    <!-- Barra de seleção múltipla -->
+    <div class="barra-selecao" id="barraSelecao">
+        <span id="contagemSelecao">0 selecionado(s)</span>
+        <button onclick="baixarSelecionados()" id="btnBaixarSelecionados">⬇️ Baixar selecionados (.zip)</button>
+        <button onclick="limparSelecao()">Limpar seleção</button>
+        <span class="status-zip" id="statusSelecao"></span>
     </div>
 
     <div class="controls-container">
@@ -113,6 +171,20 @@
     <div id="status"></div>
     <div class="grid" id="results"></div>
     <div class="pagination" id="pagination" style="display:none"></div>
+
+    <!-- Modal de visualização com navegação -->
+    <div class="modal-overlay" id="modalOverlay" onclick="fecharModalSeClicouFora(event)">
+        <button class="modal-fechar" onclick="fecharModal()" aria-label="Fechar">&times;</button>
+        <button class="modal-nav modal-nav-esq" onclick="navegarModal(-1)" aria-label="Arquivo anterior">&lsaquo;</button>
+        <div class="modal-conteudo" onclick="event.stopPropagation()">
+            <div class="modal-corpo" id="modalCorpo"></div>
+            <div class="modal-rodape">
+                <span class="modal-nome" id="modalNome"></span>
+                <span class="modal-info" id="modalContador"></span>
+            </div>
+        </div>
+        <button class="modal-nav modal-nav-dir" onclick="navegarModal(1)" aria-label="Próximo arquivo">&rsaquo;</button>
+    </div>
 
     <script>
         function toggleTema() {
@@ -141,16 +213,18 @@
         let fileCount = 0;
         let abortadorAtual = null;
 
-        // --- Paginação, ordem e duplicados ---
-        // Guardamos todos os itens encontrados (na ordem em que chegaram: do
-        // mais antigo pro mais novo) e calculamos a página exibida sob
-        // demanda, sem nunca copiar/inverter a lista inteira — assim
-        // continua rápido mesmo com milhares de itens.
-        const ITENS_POR_PAGINA = 30;
+        // --- Estado de resultados: itens, paginação, ordem, duplicados,
+        // filtros de exibição e seleção múltipla ---
+        const ITENS_POR_PAGINA = 20;
         let todosArquivos = [];
         let contagemChaves = new Map();
+        let contagemPorExtensao = new Map();
         let paginaAtual = 1;
         let ocultarDuplicados = false;
+        let extensoesVisiveis = new Set(['svg', 'pdf', 'ai', 'cdr', 'eps']);
+        let proximoIdItem = 1;
+        let idsSelecionados = new Set();
+        let indiceModalAtual = -1;
 
         function hashCurtoCliente(str) {
             let h = 0x811c9dc5;
@@ -161,47 +235,95 @@
             return (h >>> 0).toString(36);
         }
 
-        // Chave usada para detectar "o mesmo arquivo": conteúdo (hash) para
-        // SVGs embutidos, nome do arquivo para arquivos linkados (heurística
-        // — não é uma comparação byte a byte do arquivo remoto).
+        // Chave usada para detectar "o mesmo arquivo". Prioridade:
+        //  1) assinatura de conteúdo calculada pelo servidor a partir das
+        //     tags <path> do SVG (exata quanto ao desenho, ignora nome/id/cor);
+        //  2) hash do próprio src (fallback só pra SVG embutido sem <path>);
+        //  3) nome do arquivo (heurística, usada pra PDF/AI/EPS/CDR e SVGs
+        //     linkados cujo conteúdo não pôde ser baixado).
         function calcularChaveDuplicata(item) {
-            if (item.inline) {
-                return 'inline:' + hashCurtoCliente(item.src);
-            }
+            if (item.assinatura) return 'path:' + item.assinatura;
+            if (item.inline) return 'inline:' + hashCurtoCliente(item.src);
             let nome = item.src.split('/').pop().split('?')[0].toLowerCase();
             try { nome = decodeURIComponent(nome); } catch (e) {}
             return 'nome:' + item.extensao + ':' + nome;
         }
 
+        function sanitizarNome(nome, extensao) {
+            let limpo = String(nome).replace(/[\\/?%*:|"<>]/g, '-').trim();
+            if (!limpo.toLowerCase().endsWith('.' + extensao)) {
+                limpo = limpo.replace(/\.+$/, '');
+                limpo += '.' + extensao;
+            }
+            return limpo;
+        }
+
+        // Nome de exibição/download: usa o nome real vindo do servidor
+        // (Content-Disposition) quando disponível; senão tenta extrair da
+        // URL; nomes longos NÃO são mais descartados (bug antigo).
+        function calcularNomeExibicao(item) {
+            let base = item.nomeArquivo;
+            if (!base) {
+                if (item.inline) {
+                    base = null;
+                } else {
+                    base = item.src.split('/').pop().split('?')[0];
+                    try { base = decodeURIComponent(base); } catch (e) {}
+                }
+            }
+            if (!base || !base.trim()) base = `arquivo_${item._id}`;
+            return sanitizarNome(base, item.extensao);
+        }
+
+        function formatarTamanho(bytes) {
+            if (bytes === null || bytes === undefined || isNaN(bytes)) return null;
+            if (bytes < 1024) return `${bytes} B`;
+            if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+            return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+        }
+
         function registrarNovoArquivo(item) {
+            item._id = proximoIdItem++;
             const chave = calcularChaveDuplicata(item);
             const vistosAntes = contagemChaves.get(chave) || 0;
             contagemChaves.set(chave, vistosAntes + 1);
             item._duplicado = vistosAntes > 0;
+            item.nomeExibicao = calcularNomeExibicao(item);
+            item.tamanhoTexto = formatarTamanho(item.tamanhoBytes);
             todosArquivos.push(item);
 
-            const visivel = !(ocultarDuplicados && item._duplicado);
+            contagemPorExtensao.set(item.extensao, (contagemPorExtensao.get(item.extensao) || 0) + 1);
+
+            const visivel = extensoesVisiveis.has(item.extensao) && !(ocultarDuplicados && item._duplicado);
             if (paginaAtual === 1 && visivel) {
                 adicionarCardNoTopo(item);
             }
-            atualizarInfoDuplicados();
+            atualizarPainelExibicao();
         }
 
         function itensParaExibir() {
-            return ocultarDuplicados ? todosArquivos.filter((it) => !it._duplicado) : todosArquivos;
+            return todosArquivos.filter((it) => {
+                if (!extensoesVisiveis.has(it.extensao)) return false;
+                if (ocultarDuplicados && it._duplicado) return false;
+                return true;
+            });
+        }
+
+        // Lista visível, mais novo primeiro — usada tanto pela paginação
+        // quanto pela navegação do modal, pra manter a mesma ordem em
+        // ambos os lugares.
+        function itensVisiveisOrdenados() {
+            return itensParaExibir().slice().reverse();
         }
 
         function totalPaginas() {
-            return Math.max(1, Math.ceil(itensParaExibir().length / ITENS_POR_PAGINA));
+            return Math.max(1, Math.ceil(itensVisiveisOrdenados().length / ITENS_POR_PAGINA));
         }
 
-        // Mais novos primeiro: a página 1 sempre mostra os últimos itens
-        // encontrados, sem precisar inverter a lista inteira a cada chamada.
         function obterItensDaPagina(pagina) {
-            const lista = itensParaExibir();
-            const fim = lista.length - (pagina - 1) * ITENS_POR_PAGINA;
-            const inicio = Math.max(0, fim - ITENS_POR_PAGINA);
-            return lista.slice(inicio, fim).reverse();
+            const lista = itensVisiveisOrdenados();
+            const inicio = (pagina - 1) * ITENS_POR_PAGINA;
+            return lista.slice(inicio, inicio + ITENS_POR_PAGINA);
         }
 
         function renderizarPagina(pagina) {
@@ -232,22 +354,41 @@
             renderizarPagina(paginaAtual);
         }
 
-        function atualizarInfoDuplicados() {
+        function alternarExtensaoVisivel(checkbox) {
+            if (checkbox.checked) extensoesVisiveis.add(checkbox.value);
+            else extensoesVisiveis.delete(checkbox.value);
+            paginaAtual = 1;
+            renderizarPagina(paginaAtual);
+        }
+
+        // Mostra o painel de filtros de exibição assim que o primeiro
+        // resultado chega, e mantém as contagens (por extensão e de
+        // duplicados) atualizadas ao vivo.
+        function atualizarPainelExibicao() {
+            const painel = document.getElementById('painelExibicao');
+            if (todosArquivos.length > 0) painel.style.display = 'flex';
+
+            ['svg', 'pdf', 'ai', 'cdr', 'eps'].forEach((ext) => {
+                const el = document.getElementById(`cont-${ext}`);
+                const qtd = contagemPorExtensao.get(ext) || 0;
+                el.textContent = qtd > 0 ? `(${qtd})` : '';
+            });
+
             const totalDuplicados = todosArquivos.reduce((acc, it) => acc + (it._duplicado ? 1 : 0), 0);
-            const dupControls = document.getElementById('dupControls');
-            const info = document.getElementById('infoDuplicados');
+            const linhaDup = document.getElementById('linhaDuplicados');
+            const infoDup = document.getElementById('infoDuplicados');
             if (totalDuplicados > 0) {
-                dupControls.style.display = 'flex';
-                info.textContent = `(${totalDuplicados} duplicado${totalDuplicados > 1 ? 's' : ''} de ${todosArquivos.length} encontrados)`;
+                linhaDup.style.display = 'flex';
+                infoDup.textContent = `(${totalDuplicados} de ${todosArquivos.length})`;
             } else {
-                dupControls.style.display = 'none';
+                linhaDup.style.display = 'none';
             }
         }
 
         function atualizarControlesPaginacao() {
             const pagEl = document.getElementById('pagination');
             const total = totalPaginas();
-            const totalVisivel = itensParaExibir().length;
+            const totalVisivel = itensVisiveisOrdenados().length;
 
             if (totalVisivel <= ITENS_POR_PAGINA) {
                 pagEl.style.display = 'none';
@@ -264,11 +405,173 @@
             `;
         }
 
+        // --- Seleção múltipla + download em .zip ---
+        function alternarSelecao(id, marcado) {
+            if (marcado) idsSelecionados.add(id);
+            else idsSelecionados.delete(id);
+            atualizarBarraSelecao();
+        }
+
+        function atualizarBarraSelecao() {
+            const barra = document.getElementById('barraSelecao');
+            const contagem = document.getElementById('contagemSelecao');
+            if (idsSelecionados.size > 0) {
+                barra.style.display = 'flex';
+                contagem.textContent = `${idsSelecionados.size} selecionado(s)`;
+            } else {
+                barra.style.display = 'none';
+                document.getElementById('statusSelecao').textContent = '';
+            }
+        }
+
+        function limparSelecao() {
+            idsSelecionados.clear();
+            atualizarBarraSelecao();
+            renderizarPagina(paginaAtual);
+        }
+
+        async function baixarSelecionados() {
+            if (idsSelecionados.size === 0) return;
+            if (typeof JSZip === 'undefined') {
+                document.getElementById('statusSelecao').textContent = 'Erro: biblioteca de compactação não carregou.';
+                return;
+            }
+
+            const btn = document.getElementById('btnBaixarSelecionados');
+            const statusSelecao = document.getElementById('statusSelecao');
+            btn.disabled = true;
+
+            const itensSelecionados = todosArquivos.filter((it) => idsSelecionados.has(it._id));
+            const zip = new JSZip();
+            const nomesUsados = new Set();
+            let concluidos = 0;
+            let falhas = 0;
+
+            for (const item of itensSelecionados) {
+                statusSelecao.textContent = `Baixando ${concluidos + falhas + 1} de ${itensSelecionados.length}...`;
+                let nomeNoZip = item.nomeExibicao;
+                if (nomesUsados.has(nomeNoZip)) {
+                    nomeNoZip = nomeNoZip.replace(/(\.[^.]+)$/, `_${item._id}$1`);
+                }
+                nomesUsados.add(nomeNoZip);
+
+                try {
+                    if (item.inline) {
+                        const base64 = item.src.split(',')[1];
+                        zip.file(nomeNoZip, base64, { base64: true });
+                    } else {
+                        const url = `/api/download?ext=${item.extensao}&url=${encodeURIComponent(item.src)}`;
+                        const resp = await fetch(url);
+                        if (!resp.ok) throw new Error('falha ao baixar');
+                        const blob = await resp.blob();
+                        zip.file(nomeNoZip, blob);
+                    }
+                    concluidos++;
+                } catch (e) {
+                    falhas++;
+                }
+            }
+
+            if (concluidos === 0) {
+                statusSelecao.textContent = 'Não foi possível baixar nenhum dos arquivos selecionados.';
+                btn.disabled = false;
+                return;
+            }
+
+            statusSelecao.textContent = 'Compactando...';
+            try {
+                const conteudoZip = await zip.generateAsync({ type: 'blob' });
+                const urlObjeto = URL.createObjectURL(conteudoZip);
+                const a = document.createElement('a');
+                a.href = urlObjeto;
+                a.download = `arquivos_selecionados_${Date.now()}.zip`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(urlObjeto);
+                statusSelecao.textContent = falhas > 0
+                    ? `Pronto! ${concluidos} arquivo(s) no zip, ${falhas} falharam.`
+                    : `Pronto! ${concluidos} arquivo(s) compactados.`;
+            } catch (e) {
+                statusSelecao.textContent = 'Erro ao gerar o arquivo .zip.';
+            }
+            btn.disabled = false;
+        }
+
+        // --- Modal de visualização (svg/pdf embutidos; outros mostram um
+        // aviso de que não há pré-visualização) com navegação entre todos
+        // os arquivos atualmente visíveis (respeitando os filtros ativos) ---
+        function abrirModalPorId(id) {
+            const lista = itensVisiveisOrdenados();
+            const indice = lista.findIndex((it) => it._id === id);
+            if (indice === -1) return;
+            abrirModal(indice);
+        }
+
+        function abrirModal(indice) {
+            indiceModalAtual = indice;
+            renderizarModal();
+            document.getElementById('modalOverlay').style.display = 'flex';
+        }
+
+        function fecharModal() {
+            document.getElementById('modalOverlay').style.display = 'none';
+            document.getElementById('modalCorpo').innerHTML = '';
+            indiceModalAtual = -1;
+        }
+
+        function fecharModalSeClicouFora(event) {
+            if (event.target.id === 'modalOverlay') fecharModal();
+        }
+
+        function navegarModal(delta) {
+            const lista = itensVisiveisOrdenados();
+            if (lista.length === 0) return;
+            indiceModalAtual = (indiceModalAtual + delta + lista.length) % lista.length;
+            renderizarModal();
+        }
+
+        function renderizarModal() {
+            const lista = itensVisiveisOrdenados();
+            const item = lista[indiceModalAtual];
+            if (!item) { fecharModal(); return; }
+
+            const corpo = document.getElementById('modalCorpo');
+            const viewUrl = `/api/download?ext=${item.extensao}&action=view&url=${encodeURIComponent(item.src)}`;
+
+            if (item.extensao === 'svg') {
+                corpo.innerHTML = `<img src="${item.src}" alt="Pré-visualização">`;
+            } else if (item.extensao === 'pdf') {
+                corpo.innerHTML = `<iframe src="${viewUrl}" title="Pré-visualização do PDF"></iframe>`;
+            } else {
+                corpo.innerHTML = `
+                    <div class="modal-sem-preview">
+                        <p>Não é possível pré-visualizar arquivos .${item.extensao.toUpperCase()} no navegador.</p>
+                        <div class="btn-group" style="width:auto; display:inline-flex;">
+                            <a href="${viewUrl}" target="_blank" class="view-btn" style="padding:10px 20px;">Abrir em nova aba</a>
+                        </div>
+                    </div>
+                `;
+            }
+
+            document.getElementById('modalNome').textContent = item.nomeExibicao;
+            document.getElementById('modalContador').textContent =
+                `${indiceModalAtual + 1} / ${lista.length}${item.tamanhoTexto ? ' • ' + item.tamanhoTexto : ''}`;
+        }
+
+        document.addEventListener('keydown', (e) => {
+            const overlay = document.getElementById('modalOverlay');
+            if (overlay.style.display !== 'flex') return;
+            if (e.key === 'Escape') fecharModal();
+            else if (e.key === 'ArrowLeft') navegarModal(-1);
+            else if (e.key === 'ArrowRight') navegarModal(1);
+        });
+
         // --- Busca / streaming ---
         // Usamos fetch + leitura manual do stream (em vez de EventSource)
         // porque precisamos enviar POST com o estado da busca quando o
-        // servidor pede pra continuar numa nova rodada (ver "continuar"
-        // abaixo). EventSource só suporta GET.
+        // servidor pede pra continuar numa nova rodada. EventSource só
+        // suporta GET.
         function vasculharSite() {
             const urlInput = document.getElementById('urlInput').value;
             const statusEl = document.getElementById('status');
@@ -283,15 +586,24 @@
                 return;
             }
 
+            fecharModal();
             resultsEl.innerHTML = '';
             logBox.innerHTML = '';
             fileCount = 0;
             todosArquivos = [];
             contagemChaves = new Map();
+            contagemPorExtensao = new Map();
             paginaAtual = 1;
             ocultarDuplicados = false;
+            extensoesVisiveis = new Set(['svg', 'pdf', 'ai', 'cdr', 'eps']);
+            idsSelecionados = new Set();
+            proximoIdItem = 1;
+
             document.getElementById('chkOcultarDuplicados').checked = false;
-            document.getElementById('dupControls').style.display = 'none';
+            document.querySelectorAll('.chk-ext').forEach((cb) => { cb.checked = true; });
+            document.getElementById('painelExibicao').style.display = 'none';
+            document.getElementById('linhaDuplicados').style.display = 'none';
+            document.getElementById('barraSelecao').style.display = 'none';
             document.getElementById('pagination').style.display = 'none';
             statusEl.innerHTML = 'Iniciando robô...';
 
@@ -396,17 +708,12 @@
 
         function criarCardElemento(item) {
             const card = document.createElement('div');
-            card.className = 'card' + (item._duplicado ? ' duplicado' : '');
+            card.className = 'card' + (item._duplicado ? ' duplicado' : '') + (idsSelecionados.has(item._id) ? ' selecionado' : '');
 
             const downloadUrl = `/api/download?ext=${item.extensao}&url=${encodeURIComponent(item.src)}`;
-            const viewUrl = `/api/download?ext=${item.extensao}&action=view&url=${encodeURIComponent(item.src)}`;
+            const nomeArquivo = item.nomeExibicao;
 
             let visualizacaoHTML = '';
-            let nomeArquivo = item.src.split('/').pop().split('?')[0];
-
-            try { nomeArquivo = decodeURIComponent(nomeArquivo); } catch(e){}
-            if (!nomeArquivo || nomeArquivo.length > 30 || item.inline) nomeArquivo = `Arquivo.${item.extensao}`;
-
             if (item.extensao === 'svg') {
                 visualizacaoHTML = `<img src="${item.src}" alt="Vetor" loading="lazy" onerror="this.style.display='none'">`;
             } else {
@@ -417,10 +724,10 @@
             if (item.extensao === 'svg' || item.extensao === 'pdf') {
                 botoesHTML = `
                     <div class="btn-group">
-                        <a href="${viewUrl}" target="_blank" class="view-btn">
+                        <button type="button" class="view-btn" onclick="abrirModalPorId(${item._id})">
                             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" style="width:16px" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
                             Ver
-                        </a>
+                        </button>
                         <a href="${downloadUrl}" class="download-btn" download="${nomeArquivo}">
                             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" style="width:16px" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
                             Salvar
@@ -439,13 +746,16 @@
             }
 
             const badgeDuplicado = item._duplicado ? `<div class="badge-duplicado">🔁 Duplicado</div>` : '';
+            const marcado = idsSelecionados.has(item._id) ? 'checked' : '';
 
             card.innerHTML = `
                 <div class="img-container">
                     ${badgeDuplicado}
+                    <input type="checkbox" class="checkbox-selecao" ${marcado} title="Selecionar arquivo" onchange="alternarSelecao(${item._id}, this.checked)">
                     ${visualizacaoHTML}
                 </div>
                 <div class="file-name" title="${nomeArquivo}">${nomeArquivo}</div>
+                ${item.tamanhoTexto ? `<div class="file-size">${item.tamanhoTexto}</div>` : ''}
                 ${botoesHTML}
             `;
             return card;
