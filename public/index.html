@@ -62,6 +62,12 @@
         .view-btn:hover { background: #2563eb; }
         .download-btn { background: #10b981; }
         .download-btn:hover { background: #059669; }
+
+        .pagination { display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 2rem; flex-wrap: wrap; }
+        .pagination button { background: var(--card-bg); color: var(--text); border: 2px solid var(--border); padding: 8px 14px; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        .pagination button:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+        .pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
+        .pagination span { font-size: 14px; opacity: 0.85; white-space: nowrap; }
     </style>
 </head>
 <body>
@@ -91,6 +97,7 @@
 
     <div id="status"></div>
     <div class="grid" id="results"></div>
+    <div class="pagination" id="pagination" style="display:none"></div>
 
     <script>
         function toggleTema() {
@@ -119,6 +126,54 @@
         let evtSource = null;
         let fileCount = 0;
 
+        // --- Paginação ---
+        // Guardamos todos os itens encontrados num array e só desenhamos no
+        // DOM os itens da página atual. Isso evita que o navegador acumule
+        // milhares de cards/imagens de uma vez (o que trava a aba) quando o
+        // site tem muitos arquivos.
+        const ITENS_POR_PAGINA = 30;
+        let todosArquivos = [];
+        let paginaAtual = 1;
+
+        function totalPaginas() {
+            return Math.max(1, Math.ceil(todosArquivos.length / ITENS_POR_PAGINA));
+        }
+
+        function renderizarPagina(pagina) {
+            const resultsEl = document.getElementById('results');
+            resultsEl.innerHTML = '';
+            const inicio = (pagina - 1) * ITENS_POR_PAGINA;
+            const itensDaPagina = todosArquivos.slice(inicio, inicio + ITENS_POR_PAGINA);
+            itensDaPagina.forEach((item, i) => renderizarResultadoUnico(item, inicio + i + 1));
+            atualizarControlesPaginacao();
+        }
+
+        function irParaPagina(pagina) {
+            const total = totalPaginas();
+            paginaAtual = Math.min(Math.max(1, pagina), total);
+            renderizarPagina(paginaAtual);
+            document.getElementById('pagination').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function atualizarControlesPaginacao() {
+            const pagEl = document.getElementById('pagination');
+            const total = totalPaginas();
+
+            if (todosArquivos.length <= ITENS_POR_PAGINA) {
+                pagEl.style.display = 'none';
+                return;
+            }
+
+            pagEl.style.display = 'flex';
+            pagEl.innerHTML = `
+                <button onclick="irParaPagina(1)" ${paginaAtual === 1 ? 'disabled' : ''}>&laquo; Primeira</button>
+                <button onclick="irParaPagina(${paginaAtual - 1})" ${paginaAtual === 1 ? 'disabled' : ''}>&lsaquo; Anterior</button>
+                <span>Página ${paginaAtual} de ${total} <small>(${todosArquivos.length} arquivos)</small></span>
+                <button onclick="irParaPagina(${paginaAtual + 1})" ${paginaAtual === total ? 'disabled' : ''}>Próxima &rsaquo;</button>
+                <button onclick="irParaPagina(${total})" ${paginaAtual === total ? 'disabled' : ''}>Última &raquo;</button>
+            `;
+        }
+
         function vasculharSite() {
             const urlInput = document.getElementById('urlInput').value;
             const statusEl = document.getElementById('status');
@@ -142,6 +197,9 @@
             resultsEl.innerHTML = '';
             logBox.innerHTML = ''; 
             fileCount = 0;
+            todosArquivos = [];
+            paginaAtual = 1;
+            document.getElementById('pagination').style.display = 'none';
 
             adicionarLog(`[Sistema] Iniciando busca em: ${urlInput}`);
 
@@ -157,8 +215,17 @@
                 } 
                 else if (data.tipo === 'arquivo') {
                     fileCount++;
-                    renderizarResultadoUnico(data.item, fileCount);
+                    todosArquivos.push(data.item);
                     adicionarLog(`[Encontrado .${data.item.extensao.toUpperCase()}] ${data.logSrc}`, 'log-file');
+
+                    // Só desenha o card na hora se ele cair dentro da página
+                    // que o usuário está vendo agora (mantém a busca "ao
+                    // vivo" sem precisar redesenhar tudo a cada item).
+                    const posicaoNaPagina = todosArquivos.length - (paginaAtual - 1) * ITENS_POR_PAGINA;
+                    if (posicaoNaPagina >= 1 && posicaoNaPagina <= ITENS_POR_PAGINA) {
+                        renderizarResultadoUnico(data.item, todosArquivos.length);
+                    }
+                    atualizarControlesPaginacao();
                 }
                 else if (data.tipo === 'fim') {
                     evtSource.close();
