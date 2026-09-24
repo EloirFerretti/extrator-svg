@@ -612,7 +612,12 @@
 
             const corpo = document.getElementById('modalCorpo');
             const viewUrl = `/api/download?ext=${item.extensao}&action=view&url=${encodeURIComponent(item.src)}`;
-            const linkNovaAba = item.extensao === 'svg' ? item.src : viewUrl;
+            // SVG linkado (URL normal) abre direto; SVG embutido (data:
+            // URI) precisa passar pelo proxy, porque navegadores bloqueiam
+            // navegação direta pra data: URIs clicadas em um link — o
+            // proxy decodifica o data: URI e serve como um arquivo HTTP
+            // normal, que abre em nova aba sem problema.
+            const linkNovaAba = (item.extensao === 'svg' && !item.inline) ? item.src : viewUrl;
 
             if (item.extensao === 'svg') {
                 corpo.innerHTML = `<img src="${item.src}" alt="Pré-visualização">`;
