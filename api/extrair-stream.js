@@ -21,9 +21,12 @@ const MAX_PAGINAS_PADRAO = 3000;
 const MAX_PAGINAS_LIMITE = 20000;
 
 // Quantas checagens de rede (assinatura de SVG / nome+tamanho de arquivo)
-// rodam em paralelo por página. Mantém o crawler rápido sem sobrecarregar o
-// site de origem.
+// rodam em paralelo por página.
 const CONCORRENCIA_ENRIQUECIMENTO = 5;
+
+// Quantas URLs, no máximo, importar do sitemap.xml na primeira rodada de uma
+// busca nova (ajuda a achar páginas que não têm link direto na navegação).
+const MAX_URLS_SITEMAP = 500;
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 
@@ -39,8 +42,7 @@ function hashCurto(str) {
 }
 
 // Roda fn(item) para cada item em "itens", no máximo "limite" execuções
-// simultâneas, preservando a ordem de processamento apenas por disponibilidade
-// (não por índice) — usado pra buscar em paralelo, sem sequência importar.
+// simultâneas.
 async function mapComLimite(itens, limite, fn) {
   let indice = 0;
   async function trabalhador() {
@@ -53,13 +55,6 @@ async function mapComLimite(itens, limite, fn) {
   await Promise.all(trabalhadores);
 }
 
-// Assinatura de conteúdo de um SVG a partir das tags <path>: concatena o
-// atributo "d" de cada <path> (normalizando espaços) e tira um hash. Dois
-// SVGs com os mesmos caminhos geram a mesma assinatura mesmo que tenham
-// ids/classes/cores diferentes — o que costuma acontecer quando o mesmo
-// ícone é reexportado ou embutido de formas ligeiramente diferentes pelo
-// site. Retorna null se não achar nenhuma tag <path> (nesse caso o cliente
-// cai pro nome do arquivo como heurística de duplicidade).
 function assinaturaDoConteudoSvg(conteudoSvg) {
   try {
     const $svg = cheerio.load(conteudoSvg, { xmlMode: true });
@@ -75,7 +70,6 @@ function assinaturaDoConteudoSvg(conteudoSvg) {
   }
 }
 
-// Mesma ideia, mas pra um <svg> já presente no HTML da página (SVG embutido).
 function assinaturaDeElementoSvg($, el) {
   const caminhos = [];
   $(el)
@@ -99,16 +93,22 @@ function extrairNomeDeContentDisposition(cabecalho) {
   }
 }
 
-// Busca informações extras de um arquivo LINKADO (por URL):
-//  - SVG: baixa o conteúdo (GET) pra montar a assinatura por <path> e usa o
-//    próprio tamanho do conteúdo baixado.
-//  - Outros formatos (pdf/ai/eps/cdr): faz um HEAD só pra ler os cabeçalhos
-//    Content-Disposition (nome real do arquivo, quando o site informa) e
-//    Content-Length (tamanho), sem baixar o arquivo inteiro.
-// Falhas de rede (timeout, CORS do lado do servidor, 404, HEAD bloqueado
-// etc.) são silenciosas: o item simplesmente fica sem essa informação extra
-// e o cliente usa os fallbacks (nome vindo da URL, sem tamanho, dedupe por
-// nome de arquivo).
+// Alguns sites indicam o tipo real de um link sem ele aparecer na URL: pelo
+// atributo "download" (nome sugerido do arquivo) ou pelo atributo "type"
+// (MIME type). Usado como fallback quando a URL em si não termina com a
+// extensão procurada.
+function extensaoPorAtributoDownloadOuType($el, tiposPermitidos) {
+  const nomeDownload = $el.attr('download');
+  if (nomeDownload) {
+    const ext = tiposPermitidos.find((e) => nomeDownload.toLowerCase().endsWith('.' + e));
+    if (ext) return ext;
+  }
+  const tipo = ($el.attr('type') || '').toLowerCase();
+  const mapaTipos = { 'image/svg+xml': 'svg', 'application/pdf': 'pdf' };
+  if (mapaTipos[tipo] && tiposPermitidos.includes(mapaTipos[tipo])) return mapaTipos[tipo];
+  return null;
+}
+
 async function enriquecerCandidato(candidato) {
   const resultado = { assinatura: null, nomeArquivo: null, tamanhoBytes: null };
 
@@ -142,6 +142,76 @@ async function enriquecerCandidato(candidato) {
     // HEAD pode falhar em alguns servidores — segue sem nome/tamanho extra
   }
   return resultado;
+}
+
+// Busca o sitemap.xml do site (se existir) pra usar como fonte extra de
+// páginas a visitar, além dos links descobertos navegando. Isso ajuda a
+// achar páginas "órfãs" (sem link direto na navegação, ex.: atrás de um
+// menu que só renderiza ao passar o mouse) que o crawler por link nunca
+// alcançaria sozinho. Segue até 1 nível de sitemap-índice.
+async function buscarUrlsDoSitemap(origem) {
+  const urls = [];
+  try {
+    const resp = await axios.get(`${origem}/sitemap.xml`, {
+      timeout: 8000,
+      responseType: 'text',
+      maxContentLength: 5 * 1024 * 1024,
+      headers: { 'User-Agent': USER_AGENT },
+    });
+    const $ = cheerio.load(resp.data, { xmlMode: true });
+
+    const subSitemaps = [];
+    $('sitemapindex > sitemap > loc').each((_, el) => subSitemaps.push($(el).text().trim()));
+
+    if (subSitemaps.length > 0) {
+      for (const sub of subSitemaps.slice(0, 5)) {
+        if (urls.length >= MAX_URLS_SITEMAP) break;
+        try {
+          const respSub = await axios.get(sub, {
+            timeout: 8000,
+            responseType: 'text',
+            maxContentLength: 5 * 1024 * 1024,
+            headers: { 'User-Agent': USER_AGENT },
+          });
+          const $sub = cheerio.load(respSub.data, { xmlMode: true });
+          $sub('urlset > url > loc').each((_, el) => urls.push($sub(el).text().trim()));
+        } catch (e) {}
+      }
+    } else {
+      $('urlset > url > loc').each((_, el) => urls.push($(el).text().trim()));
+    }
+  } catch (e) {
+    // sem sitemap.xml, ou falhou — segue só com o link graph normal
+  }
+  return urls.slice(0, MAX_URLS_SITEMAP);
+}
+
+// Rola a página até o fim (em passos pequenos, com pausas) antes de
+// extrair o HTML. Muitos sites só carregam imagens/conteúdo quando o
+// elemento entra na viewport (lazy-load por IntersectionObserver) — sem
+// isso, o crawler nunca veria esse conteúdo. Tem um teto de distância pra
+// não travar em páginas com scroll infinito de verdade.
+async function rolarAtePreCarregarConteudo(page) {
+  try {
+    await page.evaluate(async () => {
+      await new Promise((resolve) => {
+        let distanciaTotal = 0;
+        const passo = 600;
+        const distanciaMaxima = 15000;
+        const intervalo = setInterval(() => {
+          window.scrollBy(0, passo);
+          distanciaTotal += passo;
+          if (distanciaTotal >= document.body.scrollHeight || distanciaTotal >= distanciaMaxima) {
+            clearInterval(intervalo);
+            resolve();
+          }
+        }, 120);
+      });
+      window.scrollTo(0, 0);
+    });
+  } catch (e) {
+    // se a página não permitir scroll por algum motivo, ignora
+  }
 }
 
 module.exports = async (req, res) => {
@@ -188,7 +258,6 @@ module.exports = async (req, res) => {
 
   const dominioAlvo = urlInicial.hostname;
 
-  // Reidrata o estado de uma rodada anterior (continuação) ou começa do zero.
   let filaUrls;
   let visitadosHashes;
   let encontradosHashes;
@@ -211,6 +280,32 @@ module.exports = async (req, res) => {
     encontradosHashes = new Set();
     totalPaginasAcumulado = 0;
     enviar({ tipo: 'status', mensagem: 'Iniciando robô...', urlScan: urlInicial.href, fila: 0 });
+
+    const urlsSitemap = await buscarUrlsDoSitemap(urlInicial.origin);
+    if (urlsSitemap.length > 0) {
+      let adicionadas = 0;
+      urlsSitemap.forEach((u) => {
+        try {
+          const urlObj = new URL(u);
+          urlObj.hash = '';
+          const href = urlObj.href;
+          const chave = hashCurto(href);
+          if (urlObj.hostname === dominioAlvo && !visitadosHashes.has(chave)) {
+            visitadosHashes.add(chave);
+            filaUrls.push(href);
+            adicionadas++;
+          }
+        } catch (e) {}
+      });
+      if (adicionadas > 0) {
+        enviar({
+          tipo: 'status',
+          mensagem: `Sitemap encontrado: ${adicionadas} página(s) adicionada(s) à fila.`,
+          urlScan: urlInicial.href,
+          fila: filaUrls.length,
+        });
+      }
+    }
   }
 
   let browser;
@@ -251,115 +346,155 @@ module.exports = async (req, res) => {
       });
 
       try {
-        await page.goto(urlAtual, { waitUntil: 'networkidle2', timeout: TIMEOUT_PAGINA_MS });
-        const html = await page.content();
-        const $ = cheerio.load(html);
-
-        const itensProntos = [];
-        const candidatosLinkados = [];
-        const vistosNestaPagina = new Set();
-
-        const adicionarCandidatoLinkado = (extensao, srcAbsoluto) => {
-          const chave = extensao + '|' + srcAbsoluto;
-          if (vistosNestaPagina.has(chave)) return;
-          vistosNestaPagina.add(chave);
-          candidatosLinkados.push({ extensao, src: srcAbsoluto });
-        };
-
-        if (tiposPermitidos.includes('svg')) {
-          $('img').each((_, el) => {
-            const src = $(el).attr('src');
-            if (src && src.toLowerCase().includes('.svg')) {
-              try {
-                adicionarCandidatoLinkado('svg', new URL(src, urlAtual).href);
-              } catch (e) {}
-            }
-          });
-
-          $('svg').each((_, el) => {
-            $(el).attr('xmlns', 'http://www.w3.org/2000/svg');
-            const svgHtml = $.html(el);
-            const base64 = Buffer.from(svgHtml).toString('base64');
-            itensProntos.push({
-              extensao: 'svg',
-              src: `data:image/svg+xml;base64,${base64}`,
-              inline: true,
-              assinatura: assinaturaDeElementoSvg($, el),
-              nomeArquivo: null,
-              tamanhoBytes: Buffer.byteLength(svgHtml, 'utf8'),
-            });
-          });
-        }
-
-        $('a, link, object, iframe').each((_, el) => {
-          const link = $(el).attr('href') || $(el).attr('data') || $(el).attr('src');
-          if (!link) return;
-
-          const extensaoEncontrada = tiposPermitidos.find((ext) =>
-            link.toLowerCase().split('?')[0].endsWith('.' + ext)
-          );
-          if (extensaoEncontrada) {
-            try {
-              adicionarCandidatoLinkado(extensaoEncontrada, new URL(link, urlAtual).href);
-            } catch (e) {}
-          }
-
-          try {
-            if ($(el).is('a')) {
-              const novaUrlObj = new URL(link, urlAtual);
-              novaUrlObj.hash = '';
-              const novaUrl = novaUrlObj.href;
-              const chaveUrl = hashCurto(novaUrl);
-
-              if (novaUrlObj.hostname === dominioAlvo && !visitadosHashes.has(chaveUrl)) {
-                visitadosHashes.add(chaveUrl);
-                filaUrls.push(novaUrl);
-              }
-            }
-          } catch (e) {}
+        const respostaNavegacao = await page.goto(urlAtual, {
+          waitUntil: 'networkidle2',
+          timeout: TIMEOUT_PAGINA_MS,
         });
 
-        if (candidatosLinkados.length > 0) {
+        if (respostaNavegacao && respostaNavegacao.status() >= 400) {
           enviar({
             tipo: 'status',
-            mensagem: `Verificando ${candidatosLinkados.length} arquivo(s) desta página (nome, tamanho e duplicidade)...`,
+            mensagem: `Página retornou HTTP ${respostaNavegacao.status()} — pulando (pode ser bloqueio anti-bot ou página removida).`,
             urlScan: urlAtual,
             fila: filaUrls.length,
           });
+        } else {
+          // Rola a página pra disparar lazy-load, e dá uma pequena folga
+          // pra mutações finais do JS assentarem antes de ler o HTML.
+          await rolarAtePreCarregarConteudo(page);
+          await new Promise((resolve) => setTimeout(resolve, 800));
 
-          await mapComLimite(candidatosLinkados, CONCORRENCIA_ENRIQUECIMENTO, async (candidato) => {
-            const extra = await enriquecerCandidato(candidato);
-            itensProntos.push({
-              extensao: candidato.extensao,
-              src: candidato.src,
-              inline: false,
-              assinatura: extra.assinatura,
-              nomeArquivo: extra.nomeArquivo,
-              tamanhoBytes: extra.tamanhoBytes,
+          const html = await page.content();
+          const $ = cheerio.load(html);
+
+          const itensProntos = [];
+          const candidatosLinkados = [];
+          const vistosNestaPagina = new Set();
+
+          const adicionarCandidatoLinkado = (extensao, srcAbsoluto) => {
+            const chave = extensao + '|' + srcAbsoluto;
+            if (vistosNestaPagina.has(chave)) return;
+            vistosNestaPagina.add(chave);
+            candidatosLinkados.push({ extensao, src: srcAbsoluto });
+          };
+
+          if (tiposPermitidos.includes('svg')) {
+            $('img').each((_, el) => {
+              const candidatosSrc = [
+                $(el).attr('src'),
+                $(el).attr('data-src'),
+                $(el).attr('data-lazy-src'),
+                $(el).attr('data-original'),
+              ].filter(Boolean);
+              candidatosSrc.forEach((src) => {
+                if (src.toLowerCase().split('?')[0].includes('.svg')) {
+                  try {
+                    adicionarCandidatoLinkado('svg', new URL(src, urlAtual).href);
+                  } catch (e) {}
+                }
+              });
             });
+
+            $('svg').each((_, el) => {
+              $(el).attr('xmlns', 'http://www.w3.org/2000/svg');
+              const svgHtml = $.html(el);
+              const base64 = Buffer.from(svgHtml).toString('base64');
+              itensProntos.push({
+                extensao: 'svg',
+                src: `data:image/svg+xml;base64,${base64}`,
+                inline: true,
+                assinatura: assinaturaDeElementoSvg($, el),
+                nomeArquivo: null,
+                tamanhoBytes: Buffer.byteLength(svgHtml, 'utf8'),
+              });
+            });
+
+            // background-image: url(...) em atributos style inline
+            $('[style*="url("]').each((_, el) => {
+              const style = $(el).attr('style') || '';
+              const match = /url\(\s*['"]?([^'")]+)['"]?\s*\)/i.exec(style);
+              if (match && match[1]) {
+                const ext = tiposPermitidos.find((e) => match[1].toLowerCase().split('?')[0].endsWith('.' + e));
+                if (ext) {
+                  try {
+                    adicionarCandidatoLinkado(ext, new URL(match[1], urlAtual).href);
+                  } catch (e2) {}
+                }
+              }
+            });
+          }
+
+          $('a, link, object, iframe, embed').each((_, el) => {
+            const link = $(el).attr('href') || $(el).attr('data') || $(el).attr('src');
+            if (!link) return;
+
+            let extensaoEncontrada = tiposPermitidos.find((ext) =>
+              link.toLowerCase().split('?')[0].endsWith('.' + ext)
+            );
+            if (!extensaoEncontrada) {
+              extensaoEncontrada = extensaoPorAtributoDownloadOuType($(el), tiposPermitidos);
+            }
+            if (extensaoEncontrada) {
+              try {
+                adicionarCandidatoLinkado(extensaoEncontrada, new URL(link, urlAtual).href);
+              } catch (e) {}
+            }
+
+            try {
+              if ($(el).is('a')) {
+                const novaUrlObj = new URL(link, urlAtual);
+                novaUrlObj.hash = '';
+                const novaUrl = novaUrlObj.href;
+                const chaveUrl = hashCurto(novaUrl);
+
+                if (novaUrlObj.hostname === dominioAlvo && !visitadosHashes.has(chaveUrl)) {
+                  visitadosHashes.add(chaveUrl);
+                  filaUrls.push(novaUrl);
+                }
+              }
+            } catch (e) {}
+          });
+
+          if (candidatosLinkados.length > 0) {
+            enviar({
+              tipo: 'status',
+              mensagem: `Verificando ${candidatosLinkados.length} arquivo(s) desta página (nome, tamanho e duplicidade)...`,
+              urlScan: urlAtual,
+              fila: filaUrls.length,
+            });
+
+            await mapComLimite(candidatosLinkados, CONCORRENCIA_ENRIQUECIMENTO, async (candidato) => {
+              const extra = await enriquecerCandidato(candidato);
+              itensProntos.push({
+                extensao: candidato.extensao,
+                src: candidato.src,
+                inline: false,
+                assinatura: extra.assinatura,
+                nomeArquivo: extra.nomeArquivo,
+                tamanhoBytes: extra.tamanhoBytes,
+              });
+            });
+          }
+
+          itensProntos.forEach((item) => {
+            const chaveGlobal = hashCurto(item.extensao + '|' + item.src);
+            if (!encontradosHashes.has(chaveGlobal)) {
+              encontradosHashes.add(chaveGlobal);
+              const logSrc = item.inline ? 'SVG Embutido (Código Base64)' : item.src;
+              enviar({ tipo: 'arquivo', item, logSrc });
+            }
           });
         }
-
-        itensProntos.forEach((item) => {
-          const chaveGlobal = hashCurto(item.extensao + '|' + item.src);
-          if (!encontradosHashes.has(chaveGlobal)) {
-            encontradosHashes.add(chaveGlobal);
-            const logSrc = item.inline ? 'SVG Embutido (Código Base64)' : item.src;
-            enviar({ tipo: 'arquivo', item, logSrc });
-          }
-        });
       } catch (erroPagina) {
-        // ignora página com erro/timeout e segue para a próxima da fila
+        // timeout de navegação ou outro erro pontual — pula pra próxima da fila
       }
     }
 
     const totalPaginasFinal = totalPaginasAcumulado + paginasNestaRodada;
 
     if (cancelado) {
-      // cliente desconectou (abort/fechou a aba) — nada a enviar
+      // cliente desconectou (abort/fechou a aba, ou clicou em "Parar") — nada a enviar
     } else if (motivoParada === 'tempo' && filaUrls.length > 0) {
-      // Ainda há páginas na fila, mas o tempo desta invocação acabou: manda
-      // o estado compactado para o cliente encadear a próxima rodada.
       enviar({
         tipo: 'continuar',
         totalPaginas: totalPaginasFinal,
@@ -372,7 +507,6 @@ module.exports = async (req, res) => {
       });
       res.end();
     } else {
-      // Fila esvaziou (busca realmente terminou) ou bateu no limite global.
       enviar({
         tipo: 'fim',
         totalArquivos: encontradosHashes.size,
