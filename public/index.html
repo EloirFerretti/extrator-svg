@@ -30,21 +30,26 @@
         .search-box { display: flex; gap: 10px; justify-content: center; margin-bottom: 1rem; flex-wrap: wrap; }
         input[type="url"] { flex: 1; min-width: 300px; max-width: 500px; padding: 12px 20px; border: 2px solid var(--border); border-radius: 8px; background: var(--input-bg); color: var(--text); font-size: 16px; outline: none; }
         input[type="url"]:focus { border-color: var(--primary); }
+        input[type="url"].input-invalido { border-color: #ef4444; }
         button.btn-search { padding: 12px 24px; background: var(--primary); color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; }
         button.btn-search:disabled { filter: grayscale(0.5); cursor: not-allowed; }
+        button.btn-parar { padding: 12px 24px; background: #ef4444; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; }
+        button.btn-parar:hover { background: #dc2626; }
+
+        .aviso-url { text-align: center; color: #ef4444; font-size: 13px; margin-top: -0.5rem; margin-bottom: 1rem; min-height: 1.2em; }
 
         .filters { display: flex; justify-content: center; gap: 20px; margin-bottom: 1rem; flex-wrap: wrap; }
         .filters label { display: flex; align-items: center; gap: 5px; font-weight: bold; cursor: pointer; }
         .filters input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; }
 
         /* Painel de filtros de EXIBIÇÃO (aparece quando os resultados começam a chegar) */
-        .painel-exibicao { display: none; flex-direction: column; align-items: center; gap: 10px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; margin-bottom: 1rem; }
-        .painel-exibicao .linha { display: flex; justify-content: center; align-items: center; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+        .painel-exibicao { display: none; justify-content: center; align-items: center; gap: 16px; flex-wrap: wrap; background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; margin-bottom: 1rem; font-size: 14px; }
         .painel-exibicao .titulo { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.6; font-weight: bold; }
         .painel-exibicao label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
         .painel-exibicao input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
         .painel-exibicao .contagem { opacity: 0.6; font-size: 12px; }
         .painel-exibicao .separador { width: 1px; height: 18px; background: var(--border); }
+        #grupoDuplicados { display: none; align-items: center; gap: 16px; }
 
         /* Barra de seleção múltipla */
         .barra-selecao { display: none; justify-content: center; align-items: center; gap: 12px; background: var(--primary); color: #fff; border-radius: 10px; padding: 10px 16px; margin-bottom: 1rem; flex-wrap: wrap; }
@@ -86,11 +91,13 @@
         .download-btn { background: #10b981; }
         .download-btn:hover { background: #059669; }
 
-        .pagination { display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 2rem; flex-wrap: wrap; }
-        .pagination button { background: var(--card-bg); color: var(--text); border: 2px solid var(--border); padding: 8px 14px; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        .pagination { display: flex; justify-content: center; align-items: center; gap: 6px; margin-top: 2rem; flex-wrap: wrap; }
+        .pagination button { background: var(--card-bg); color: var(--text); border: 2px solid var(--border); min-width: 38px; padding: 8px 10px; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.2s; }
         .pagination button:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
         .pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
-        .pagination span { font-size: 14px; opacity: 0.85; white-space: nowrap; }
+        .pagination button.pagina-atual { background: var(--primary); border-color: var(--primary); color: #fff; }
+        .pagination .pagina-reticencias { padding: 0 4px; opacity: 0.5; }
+        .pagination .pagina-info { font-size: 13px; opacity: 0.7; margin-left: 8px; white-space: nowrap; }
 
         /* Modal de visualização */
         .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.88); z-index: 1000; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box; }
@@ -100,9 +107,11 @@
         .modal-corpo iframe { width: 100%; height: 65vh; border: none; background: #fff; border-radius: 6px; }
         .modal-sem-preview { text-align: center; padding: 40px 20px; color: var(--text); }
         .modal-sem-preview p { opacity: 0.7; margin-bottom: 16px; }
-        .modal-rodape { padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 13px; border-top: 1px solid var(--border); color: var(--text); flex-wrap: wrap; }
+        .modal-rodape { padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; gap: 14px; font-size: 13px; border-top: 1px solid var(--border); color: var(--text); flex-wrap: wrap; }
         .modal-rodape .modal-nome { font-weight: bold; word-break: break-all; }
         .modal-rodape .modal-info { opacity: 0.6; white-space: nowrap; }
+        .modal-link-nova-aba { color: var(--primary); text-decoration: none; font-weight: bold; white-space: nowrap; }
+        .modal-link-nova-aba:hover { text-decoration: underline; }
         .modal-fechar { position: absolute; top: 16px; right: 16px; background: rgba(255,255,255,0.15); color: #fff; border: none; font-size: 26px; line-height: 1; width: 42px; height: 42px; border-radius: 50%; cursor: pointer; z-index: 1001; }
         .modal-fechar:hover { background: rgba(255,255,255,0.3); }
         .modal-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(255,255,255,0.15); color: #fff; border: none; font-size: 30px; width: 48px; height: 48px; border-radius: 50%; cursor: pointer; z-index: 1001; }
@@ -123,9 +132,11 @@
     </div>
     
     <div class="search-box">
-        <input type="url" id="urlInput" placeholder="https://exemplo.com" required>
+        <input type="url" id="urlInput" placeholder="https://exemplo.com" required oninput="verificarUrlEmTempoReal()">
         <button class="btn-search" id="searchBtn" onclick="vasculharSite()">Buscar Arquivos</button>
+        <button class="btn-parar" id="pararBtn" onclick="pararBusca()" style="display:none">⏹ Parar</button>
     </div>
+    <div class="aviso-url" id="avisoUrl"></div>
 
     <div class="filters">
         <label><input type="checkbox" value="svg" checked> .SVG</label>
@@ -135,24 +146,29 @@
         <label><input type="checkbox" value="eps" checked> .EPS</label>
     </div>
 
+    <div class="controls-container">
+        <button class="btn-acao" onclick="toggleLogs()">📋 Mostrar/Ocultar Terminal de Busca</button>
+    </div>
+    <div id="logBox" class="log-box"></div>
+
+    <div id="status"></div>
+
     <!-- Filtros de EXIBIÇÃO: só controlam o que já foi encontrado, não a busca em si -->
     <div class="painel-exibicao" id="painelExibicao">
-        <div class="linha">
-            <span class="titulo">Mostrar:</span>
-            <label><input type="checkbox" class="chk-ext" value="svg" checked onchange="alternarExtensaoVisivel(this)"> SVG <span class="contagem" id="cont-svg"></span></label>
-            <label><input type="checkbox" class="chk-ext" value="pdf" checked onchange="alternarExtensaoVisivel(this)"> PDF <span class="contagem" id="cont-pdf"></span></label>
-            <label><input type="checkbox" class="chk-ext" value="ai" checked onchange="alternarExtensaoVisivel(this)"> AI <span class="contagem" id="cont-ai"></span></label>
-            <label><input type="checkbox" class="chk-ext" value="cdr" checked onchange="alternarExtensaoVisivel(this)"> CDR <span class="contagem" id="cont-cdr"></span></label>
-            <label><input type="checkbox" class="chk-ext" value="eps" checked onchange="alternarExtensaoVisivel(this)"> EPS <span class="contagem" id="cont-eps"></span></label>
-        </div>
-        <div class="linha" id="linhaDuplicados" style="display:none">
-            <div class="separador"></div>
-            <label title="Considera duplicado quando o desenho (tags <path>) do SVG é idêntico, ou quando um arquivo linkado tem o mesmo nome de outro já encontrado.">
+        <span class="titulo">Mostrar:</span>
+        <label><input type="checkbox" class="chk-ext" value="svg" checked onchange="alternarExtensaoVisivel(this)"> SVG <span class="contagem" id="cont-svg"></span></label>
+        <label><input type="checkbox" class="chk-ext" value="pdf" checked onchange="alternarExtensaoVisivel(this)"> PDF <span class="contagem" id="cont-pdf"></span></label>
+        <label><input type="checkbox" class="chk-ext" value="ai" checked onchange="alternarExtensaoVisivel(this)"> AI <span class="contagem" id="cont-ai"></span></label>
+        <label><input type="checkbox" class="chk-ext" value="cdr" checked onchange="alternarExtensaoVisivel(this)"> CDR <span class="contagem" id="cont-cdr"></span></label>
+        <label><input type="checkbox" class="chk-ext" value="eps" checked onchange="alternarExtensaoVisivel(this)"> EPS <span class="contagem" id="cont-eps"></span></label>
+        <span id="grupoDuplicados">
+            <span class="separador"></span>
+            <label title="Mantém pelo menos 1 arquivo de cada grupo de duplicados — nunca oculta um grupo inteiro. Duplicado = mesmo desenho (tags <path>) ou mesmo nome de arquivo.">
                 <input type="checkbox" id="chkOcultarDuplicados" onchange="alternarOcultarDuplicados()">
-                Ocultar duplicados
+                Duplicados
             </label>
             <span class="contagem" id="infoDuplicados"></span>
-        </div>
+        </span>
     </div>
 
     <!-- Barra de seleção múltipla -->
@@ -163,12 +179,6 @@
         <span class="status-zip" id="statusSelecao"></span>
     </div>
 
-    <div class="controls-container">
-        <button class="btn-acao" onclick="toggleLogs()">📋 Mostrar/Ocultar Terminal de Busca</button>
-    </div>
-    <div id="logBox" class="log-box"></div>
-
-    <div id="status"></div>
     <div class="grid" id="results"></div>
     <div class="pagination" id="pagination" style="display:none"></div>
 
@@ -180,6 +190,7 @@
             <div class="modal-corpo" id="modalCorpo"></div>
             <div class="modal-rodape">
                 <span class="modal-nome" id="modalNome"></span>
+                <a href="#" target="_blank" class="modal-link-nova-aba" id="modalAbrirNovaAba">Abrir em nova aba ↗</a>
                 <span class="modal-info" id="modalContador"></span>
             </div>
         </div>
@@ -210,6 +221,29 @@
             logBox.scrollTop = logBox.scrollHeight; 
         }
 
+        // --- Validação de URL ---
+        function validarUrl(valor) {
+            try {
+                const u = new URL(valor);
+                return u.protocol === 'http:' || u.protocol === 'https:';
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function verificarUrlEmTempoReal() {
+            const input = document.getElementById('urlInput');
+            const aviso = document.getElementById('avisoUrl');
+            const valor = input.value.trim();
+            if (!valor || validarUrl(valor)) {
+                input.classList.remove('input-invalido');
+                aviso.textContent = '';
+            } else {
+                input.classList.add('input-invalido');
+                aviso.textContent = 'URL inválida — use uma URL completa, começando com http:// ou https://';
+            }
+        }
+
         let fileCount = 0;
         let abortadorAtual = null;
 
@@ -235,12 +269,6 @@
             return (h >>> 0).toString(36);
         }
 
-        // Chave usada para detectar "o mesmo arquivo". Prioridade:
-        //  1) assinatura de conteúdo calculada pelo servidor a partir das
-        //     tags <path> do SVG (exata quanto ao desenho, ignora nome/id/cor);
-        //  2) hash do próprio src (fallback só pra SVG embutido sem <path>);
-        //  3) nome do arquivo (heurística, usada pra PDF/AI/EPS/CDR e SVGs
-        //     linkados cujo conteúdo não pôde ser baixado).
         function calcularChaveDuplicata(item) {
             if (item.assinatura) return 'path:' + item.assinatura;
             if (item.inline) return 'inline:' + hashCurtoCliente(item.src);
@@ -258,9 +286,6 @@
             return limpo;
         }
 
-        // Nome de exibição/download: usa o nome real vindo do servidor
-        // (Content-Disposition) quando disponível; senão tenta extrair da
-        // URL; nomes longos NÃO são mais descartados (bug antigo).
         function calcularNomeExibicao(item) {
             let base = item.nomeArquivo;
             if (!base) {
@@ -285,6 +310,7 @@
         function registrarNovoArquivo(item) {
             item._id = proximoIdItem++;
             const chave = calcularChaveDuplicata(item);
+            item._chaveDuplicata = chave;
             const vistosAntes = contagemChaves.get(chave) || 0;
             contagemChaves.set(chave, vistosAntes + 1);
             item._duplicado = vistosAntes > 0;
@@ -294,24 +320,46 @@
 
             contagemPorExtensao.set(item.extensao, (contagemPorExtensao.get(item.extensao) || 0) + 1);
 
-            const visivel = extensoesVisiveis.has(item.extensao) && !(ocultarDuplicados && item._duplicado);
+            const visivel = itemEstaVisivelAgora(item);
             if (paginaAtual === 1 && visivel) {
                 adicionarCardNoTopo(item);
             }
             atualizarPainelExibicao();
         }
 
-        function itensParaExibir() {
-            return todosArquivos.filter((it) => {
-                if (!extensoesVisiveis.has(it.extensao)) return false;
-                if (ocultarDuplicados && it._duplicado) return false;
-                return true;
-            });
+        // Um item recém-chegado só entra "ao vivo" na página 1 se, com o
+        // estado atual de filtros, ele apareceria em itensParaExibir(): ou
+        // não está ocultando duplicados, ou ele é a primeira ocorrência do
+        // seu grupo (o próprio ato de ocultar nunca reclassifica itens já
+        // existentes, só decide sobre o item novo).
+        function itemEstaVisivelAgora(item) {
+            if (!extensoesVisiveis.has(item.extensao)) return false;
+            if (ocultarDuplicados && item._duplicado) return false;
+            return true;
         }
 
-        // Lista visível, mais novo primeiro — usada tanto pela paginação
-        // quanto pela navegação do modal, pra manter a mesma ordem em
-        // ambos os lugares.
+        // Filtra por extensão e, ao ocultar duplicados, agrupa pela chave de
+        // duplicata e mantém exatamente 1 representante de cada grupo (o
+        // item original, não-duplicado) — nunca faz um grupo inteiro
+        // desaparecer da lista.
+        function itensParaExibir() {
+            const porExtensao = todosArquivos.filter((it) => extensoesVisiveis.has(it.extensao));
+            if (!ocultarDuplicados) return porExtensao;
+
+            const grupos = new Map();
+            porExtensao.forEach((it) => {
+                if (!grupos.has(it._chaveDuplicata)) grupos.set(it._chaveDuplicata, []);
+                grupos.get(it._chaveDuplicata).push(it);
+            });
+
+            const resultado = [];
+            grupos.forEach((itensDoGrupo) => {
+                resultado.push(itensDoGrupo.find((it) => !it._duplicado) || itensDoGrupo[0]);
+            });
+            resultado.sort((a, b) => a._id - b._id);
+            return resultado;
+        }
+
         function itensVisiveisOrdenados() {
             return itensParaExibir().slice().reverse();
         }
@@ -361,9 +409,6 @@
             renderizarPagina(paginaAtual);
         }
 
-        // Mostra o painel de filtros de exibição assim que o primeiro
-        // resultado chega, e mantém as contagens (por extensão e de
-        // duplicados) atualizadas ao vivo.
         function atualizarPainelExibicao() {
             const painel = document.getElementById('painelExibicao');
             if (todosArquivos.length > 0) painel.style.display = 'flex';
@@ -375,14 +420,39 @@
             });
 
             const totalDuplicados = todosArquivos.reduce((acc, it) => acc + (it._duplicado ? 1 : 0), 0);
-            const linhaDup = document.getElementById('linhaDuplicados');
+            const grupoDup = document.getElementById('grupoDuplicados');
             const infoDup = document.getElementById('infoDuplicados');
             if (totalDuplicados > 0) {
-                linhaDup.style.display = 'flex';
+                grupoDup.style.display = 'flex';
                 infoDup.textContent = `(${totalDuplicados} de ${todosArquivos.length})`;
             } else {
-                linhaDup.style.display = 'none';
+                grupoDup.style.display = 'none';
             }
+        }
+
+        // Gera a lista de números de página a mostrar, com "..." nas
+        // lacunas: sempre inclui a primeira, a última e uma janela ao redor
+        // da página atual, pra dar pra ir direto a qualquer página mesmo
+        // com centenas delas.
+        function gerarNumerosPaginacao(atual, total) {
+            const paginas = [];
+            const janela = 2;
+            const adicionar = (p) => { if (!paginas.includes(p)) paginas.push(p); };
+
+            adicionar(1);
+            for (let p = atual - janela; p <= atual + janela; p++) {
+                if (p > 1 && p < total) adicionar(p);
+            }
+            if (total > 1) adicionar(total);
+
+            paginas.sort((a, b) => a - b);
+
+            const resultado = [];
+            for (let i = 0; i < paginas.length; i++) {
+                if (i > 0 && paginas[i] - paginas[i - 1] > 1) resultado.push('...');
+                resultado.push(paginas[i]);
+            }
+            return resultado;
         }
 
         function atualizarControlesPaginacao() {
@@ -396,12 +466,18 @@
             }
 
             pagEl.style.display = 'flex';
+            const numeros = gerarNumerosPaginacao(paginaAtual, total);
+            const botoesNumericos = numeros.map((n) =>
+                n === '...'
+                    ? `<span class="pagina-reticencias">…</span>`
+                    : `<button class="${n === paginaAtual ? 'pagina-atual' : ''}" onclick="irParaPagina(${n})">${n}</button>`
+            ).join('');
+
             pagEl.innerHTML = `
-                <button onclick="irParaPagina(1)" ${paginaAtual === 1 ? 'disabled' : ''}>&laquo; Primeira</button>
-                <button onclick="irParaPagina(${paginaAtual - 1})" ${paginaAtual === 1 ? 'disabled' : ''}>&lsaquo; Anterior</button>
-                <span>Página ${paginaAtual} de ${total} <small>(${totalVisivel} arquivos)</small></span>
-                <button onclick="irParaPagina(${paginaAtual + 1})" ${paginaAtual === total ? 'disabled' : ''}>Próxima &rsaquo;</button>
-                <button onclick="irParaPagina(${total})" ${paginaAtual === total ? 'disabled' : ''}>Última &raquo;</button>
+                <button onclick="irParaPagina(${paginaAtual - 1})" ${paginaAtual === 1 ? 'disabled' : ''} title="Anterior">&lsaquo;</button>
+                ${botoesNumericos}
+                <button onclick="irParaPagina(${paginaAtual + 1})" ${paginaAtual === total ? 'disabled' : ''} title="Próxima">&rsaquo;</button>
+                <span class="pagina-info">(${totalVisivel} arquivos)</span>
             `;
         }
 
@@ -498,9 +574,7 @@
             btn.disabled = false;
         }
 
-        // --- Modal de visualização (svg/pdf embutidos; outros mostram um
-        // aviso de que não há pré-visualização) com navegação entre todos
-        // os arquivos atualmente visíveis (respeitando os filtros ativos) ---
+        // --- Modal de visualização ---
         function abrirModalPorId(id) {
             const lista = itensVisiveisOrdenados();
             const indice = lista.findIndex((it) => it._id === id);
@@ -538,6 +612,7 @@
 
             const corpo = document.getElementById('modalCorpo');
             const viewUrl = `/api/download?ext=${item.extensao}&action=view&url=${encodeURIComponent(item.src)}`;
+            const linkNovaAba = item.extensao === 'svg' ? item.src : viewUrl;
 
             if (item.extensao === 'svg') {
                 corpo.innerHTML = `<img src="${item.src}" alt="Pré-visualização">`;
@@ -546,15 +621,13 @@
             } else {
                 corpo.innerHTML = `
                     <div class="modal-sem-preview">
-                        <p>Não é possível pré-visualizar arquivos .${item.extensao.toUpperCase()} no navegador.</p>
-                        <div class="btn-group" style="width:auto; display:inline-flex;">
-                            <a href="${viewUrl}" target="_blank" class="view-btn" style="padding:10px 20px;">Abrir em nova aba</a>
-                        </div>
+                        <p>Não é possível pré-visualizar arquivos .${item.extensao.toUpperCase()} no navegador. Use o link "Abrir em nova aba" abaixo.</p>
                     </div>
                 `;
             }
 
             document.getElementById('modalNome').textContent = item.nomeExibicao;
+            document.getElementById('modalAbrirNovaAba').href = linkNovaAba;
             document.getElementById('modalContador').textContent =
                 `${indiceModalAtual + 1} / ${lista.length}${item.tamanhoTexto ? ' • ' + item.tamanhoTexto : ''}`;
         }
@@ -568,12 +641,23 @@
         });
 
         // --- Busca / streaming ---
-        // Usamos fetch + leitura manual do stream (em vez de EventSource)
-        // porque precisamos enviar POST com o estado da busca quando o
-        // servidor pede pra continuar numa nova rodada. EventSource só
-        // suporta GET.
+        function pararBusca() {
+            if (abortadorAtual) abortadorAtual.abort();
+            const statusEl = document.getElementById('status');
+            voltarBotoesAoNormal();
+            statusEl.innerHTML = `<span style="color:#f59e0b">⏹ Busca interrompida pelo usuário. ${todosArquivos.length} arquivo(s) encontrado(s) até agora.</span>`;
+            adicionarLog('[Sistema] Busca interrompida pelo usuário.');
+        }
+
+        function voltarBotoesAoNormal() {
+            const btn = document.getElementById('searchBtn');
+            btn.disabled = false;
+            btn.textContent = 'Buscar Arquivos';
+            document.getElementById('pararBtn').style.display = 'none';
+        }
+
         function vasculharSite() {
-            const urlInput = document.getElementById('urlInput').value;
+            const urlInput = document.getElementById('urlInput').value.trim();
             const statusEl = document.getElementById('status');
             const resultsEl = document.getElementById('results');
             const logBox = document.getElementById('logBox');
@@ -583,6 +667,12 @@
 
             if (!urlInput || !tiposSelecionados) {
                 statusEl.innerHTML = '<span style="color:#ef4444">Insira a URL e selecione pelo menos 1 filtro!</span>';
+                return;
+            }
+
+            if (!validarUrl(urlInput)) {
+                verificarUrlEmTempoReal();
+                statusEl.innerHTML = '<span style="color:#ef4444">URL inválida. Digite uma URL completa, começando com http:// ou https:// (ex.: https://exemplo.com)</span>';
                 return;
             }
 
@@ -602,7 +692,7 @@
             document.getElementById('chkOcultarDuplicados').checked = false;
             document.querySelectorAll('.chk-ext').forEach((cb) => { cb.checked = true; });
             document.getElementById('painelExibicao').style.display = 'none';
-            document.getElementById('linhaDuplicados').style.display = 'none';
+            document.getElementById('grupoDuplicados').style.display = 'none';
             document.getElementById('barraSelecao').style.display = 'none';
             document.getElementById('pagination').style.display = 'none';
             statusEl.innerHTML = 'Iniciando robô...';
@@ -620,12 +710,12 @@
             const btn = document.getElementById('searchBtn');
             btn.disabled = true;
             btn.textContent = 'Vasculhando...';
+            document.getElementById('pararBtn').style.display = 'inline-block';
 
             let proximoCorpo = null;
 
             function finalizarComErro(msg) {
-                btn.disabled = false;
-                btn.textContent = 'Buscar Arquivos';
+                voltarBotoesAoNormal();
                 statusEl.innerHTML = `<span style="color:#ef4444">${msg}</span>`;
             }
 
@@ -642,8 +732,7 @@
                     adicionarLog(`[Sistema] Ainda há páginas na fila — continuando automaticamente (página ${data.totalPaginas})...`);
                     proximoCorpo = { url: corpo.url, types: corpo.types, maxPages: corpo.maxPages, estado: data.estado };
                 } else if (data.tipo === 'fim') {
-                    btn.disabled = false;
-                    btn.textContent = 'Buscar Arquivos';
+                    voltarBotoesAoNormal();
                     let msg = `<span style="color:#10b981">Busca finalizada! ${data.totalArquivos} arquivos encontrados em ${data.totalPaginas} páginas.</span>`;
                     if (data.limiteAtingido) {
                         msg += `<br><small style="opacity:0.75">⏱️ Limite de segurança de páginas atingido — pode haver mais arquivos no site.</small>`;
